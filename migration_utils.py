@@ -45,57 +45,84 @@ def update_last_sync_time(table_name, sync_time, lock):
 
 def _load_data_merge(connection, table_name, p_keys, columns, rows):
     """
-    타겟 DB에 MERGE 문을 사용하여 데이터를 적재(Upsert)하고, 오류 건수를 반환합니다.
+    타겟 DB에 데이터를 적재하고, 오류 건수를 반환합니다.
+    p_keys가 제공되면 MERGE (Upsert)를 사용하고, 그렇지 않으면 단순 INSERT를 사용합니다.
     """
     if not rows:
         logging.debug(f"[{table_name}] 적재할 새로운 데이터가 없습니다.")
         return 0
 
+    num_errors = 0
     cols_str = ", ".join(columns)
-    on_condition = " AND ".join([f"T.{pk} = S.{pk}" for pk in p_keys])
-    update_cols = [col for col in columns if col not in p_keys]
-    
-    if update_cols:
-        update_set = ", ".join([f"T.{col} = S.{col}" for col in update_cols])
-        update_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
-    else:
-        logging.warning(f"[{table_name}] PK 외 업데이트할 컬럼이 없어 INSERT만 수행됩니다.")
-        update_clause = f"WHEN MATCHED THEN UPDATE SET T.{p_keys[0]} = S.{p_keys[0]}"
+    bind_vars = ", ".join([f':{i+1}' for i, _ in enumerate(columns)])
 
-    insert_cols = cols_str
-    insert_vals = ", ".join([f"S.{col}" for col in columns])
-
-    merge_sql = f"""
-    MERGE INTO {table_name} T
-    USING (
-        SELECT {', '.join([f':{i+1} AS {col}' for i, col in enumerate(columns, 1)])} FROM DUAL
-    ) S ON ({on_condition})
-    {update_clause}
-    WHEN NOT MATCHED THEN
-        INSERT ({insert_cols})
-        VALUES ({insert_vals})
-    """
-    
     with connection.cursor() as cursor:
         try:
-            cursor.executemany(merge_sql, rows, batcherrors=True)
-            errors = cursor.getbatcherrors()
-            num_errors = len(errors)
-            
-            if num_errors > 0:
-                logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생.")
-            
-            connection.commit()
-            successful_rows = len(rows) - num_errors
-            if successful_rows > 0:
-                logging.info(f"[{table_name}] {successful_rows}건 데이터 MERGE 완료.")
-            
-            return num_errors
+            if not p_keys:
+                # No primary keys, use simple INSERT
+                logging.info(f"[{table_name}] Primary Key가 없어 단순 INSERT로 적재합니다. (중복 데이터가 발생할 수 있음)")
+                insert_sql = f"""
+                INSERT INTO {table_name} ({cols_str})
+                VALUES ({bind_vars})
+                """
+                cursor.executemany(insert_sql, rows, batcherrors=True)
+                errors = cursor.getbatcherrors()
+                num_errors = len(errors)
+                if num_errors > 0:
+                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 INSERT 오류 발생.")
+                
+                connection.commit()
+                successful_rows = len(rows) - num_errors
+                if successful_rows > 0:
+                    logging.info(f"[{table_name}] {successful_rows}건 데이터 INSERT 완료.")
+            else:
+                # Primary keys are available, use MERGE (Upsert)
+                logging.info(f"[{table_name}] Primary Key가 있어 MERGE (Upsert)로 적재합니다.")
+                on_condition = " AND ".join([f"T.{pk} = S.{pk}" for pk in p_keys])
+                update_cols = [col for col in columns if col not in p_keys]
+
+                if update_cols:
+                    update_set = ", ".join([f"T.{col} = S.{col}" for col in update_cols])
+                    update_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
+                else:
+                    logging.info(f"[{table_name}] PK 외 업데이트할 컬럼이 없어 WHEN MATCHED 시 UPDATE가 아닌 단순 PK 일치 확인만 수행됩니다.")
+                    update_clause = f"WHEN MATCHED THEN UPDATE SET T.{p_keys[0]} = S.{p_keys[0]}" # Still needs a valid column for update part
+
+                insert_cols = cols_str
+                insert_vals = ", ".join([f"S.{col}" for col in columns])
+
+                merge_sql = f"""
+                MERGE INTO {table_name} T
+                USING (
+                    SELECT {', '.join([f':{i+1} AS {col}' for i, col in enumerate(columns, 1)])} FROM DUAL
+                ) S ON ({on_condition})
+                {update_clause}
+                WHEN NOT MATCHED THEN
+                    INSERT ({insert_cols})
+                    VALUES ({insert_vals})
+                """
+                cursor.executemany(merge_sql, rows, batcherrors=True)
+                errors = cursor.getbatcherrors()
+                num_errors = len(errors)
+                
+                if num_errors > 0:
+                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생.")
+                
+                connection.commit()
+                successful_rows = len(rows) - num_errors
+                if successful_rows > 0:
+                    logging.info(f"[{table_name}] {successful_rows}건 데이터 MERGE 완료.")
 
         except cx_Oracle.Error as e:
-            logging.error(f"[{table_name}] MERGE 작업 중 심각한 DB 오류: {e}")
+            logging.error(f"[{table_name}] DB 작업 중 심각한 오류 발생: {e}")
             connection.rollback()
             raise
+        except Exception as e:
+            logging.error(f"[{table_name}] 알 수 없는 오류 발생: {e}")
+            connection.rollback()
+            raise
+    
+    return num_errors
 
 
 def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn):

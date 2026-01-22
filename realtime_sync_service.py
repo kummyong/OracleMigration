@@ -43,7 +43,7 @@ def load_table_configs():
         return None
 
 def enrich_table_configs(configs):
-    """테이블 설정에 PK 정보가 없으면 DB에서 조회하여 채워넣습니다."""
+    """테이블 설정에 PK 정보가 없으면 DB에서 조회하여 채워넣습니다. PK가 없으면 빈 리스트로 설정합니다."""
     enriched_configs = []
     source_conn = None
     try:
@@ -51,16 +51,18 @@ def enrich_table_configs(configs):
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
         for config in configs:
             table_name = config['table_name']
+            # PK가 설정 파일에 명시되어 있지 않으면 DB에서 조회 시도
             if not config.get('primary_keys'):
                 pk_columns = get_primary_keys(source_conn, table_name)
-                if not pk_columns:
-                    logging.error(f"[{table_name}] PK 자동 조회 실패. `tables_config.json`에 직접 명시하거나 DB에 PK를 설정해주세요. 동기화 대상에서 제외됩니다.")
-                    continue
-                config['primary_keys'] = pk_columns
-            if config.get('primary_keys'):
-                enriched_configs.append(config)
-            else:
-                 logging.warning(f"[{table_name}] PK 정보가 없어 동기화 대상에서 제외됩니다.")
+                if pk_columns:
+                    config['primary_keys'] = pk_columns
+                else:
+                    logging.warning(f"[{table_name}] Primary Key를 찾을 수 없습니다. (PK 없이 INSERT 모드로 진행)")
+                    config['primary_keys'] = [] # PK가 없으면 빈 리스트로 설정
+            
+            # PK 유무와 관계없이 모든 테이블을 동기화 대상에 추가
+            enriched_configs.append(config)
+            
     except Exception as e:
         logging.critical(f"테이블 설정 보강 중 오류: {e}", exc_info=True)
         return None
