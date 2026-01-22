@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG
+from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, TABLES_CONFIG_FILE, DASHBOARD_FILE
 from database import get_db_connection, get_primary_keys
 from migration_utils import migrate, get_last_sync_time, update_last_sync_time
 from dashboard_generator import generate_html_dashboard
@@ -15,7 +15,6 @@ from dashboard_generator import generate_html_dashboard
 SYNC_INTERVAL_SECONDS = 10 
 MAX_WORKERS = 10
 FETCH_SIZE = 1000
-TABLES_CONFIG_FILE = 'tables_config.json'
 # -------------------- #
 
 log_format = '%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'
@@ -143,7 +142,7 @@ def main_service_loop():
                     cycle_status["tables"][config['table_name']] = {"status": "in_progress", "message": "대기중..."}
             
             # 초기 대시보드 생성
-            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS)
+            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
             # 동기화 작업 제출
             futures = [executor.submit(sync_single_table, config, cycle_start_time) for config in enriched_configs]
@@ -154,7 +153,7 @@ def main_service_loop():
             
             # 최종 대시보드 업데이트 (선택사항이지만, 모든 작업 완료 후 상태를 보기 위해)
             with cycle_status_lock:
-                 generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS)
+                 generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
 if __name__ == '__main__':
     try:

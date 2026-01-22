@@ -67,7 +67,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def generate_html_dashboard(status_data, interval):
+def generate_html_dashboard(status_data, interval, output_path):
     """주어진 상태 데이터로 HTML 대시보드 파일을 생성합니다."""
     
     table_rows = []
@@ -102,8 +102,8 @@ def generate_html_dashboard(status_data, interval):
     )
 
     try:
-        with open('sync_status.html', 'w', encoding='utf-8') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        logging.info("`sync_status.html` 대시보드 파일이 업데이트되었습니다.")
+        logging.info(f"`{output_path}` 대시보드 파일이 업데이트되었습니다.")
     except IOError as e:
         logging.error(f"대시보드 파일 작성 실패: {e}")
