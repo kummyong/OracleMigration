@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.venv/
+venv/
+Env/
+
+# Gemini CLI temp files
+.gemini/
+
+# Generated status files
+sync_status.html
+last_sync_times.json
+
+# Configuration file - IMPORTANT: Contains credentials
+# If you want to share the code structure without credentials, 
+# you can commit a 'config.py.example' file instead.
+config.py
