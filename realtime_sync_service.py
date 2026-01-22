@@ -5,6 +5,7 @@ import time
 import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
 
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, TABLES_CONFIG_FILE, DASHBOARD_FILE
 from database import get_db_connection, get_primary_keys
@@ -80,6 +81,9 @@ def sync_single_table(table_config, sync_start_time):
     source_conn, target_conn = None, None
     try:
         last_sync = get_last_sync_time(table_name)
+        logging.info(f"[{table_name}] Previous sync time: {last_sync.isoformat()}")
+        logging.info(f"[{table_name}] Current cycle window end: {sync_start_time.isoformat()}")
+        
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
         target_conn = get_db_connection(TARGET_DB_CONFIG)
 
@@ -92,6 +96,8 @@ def sync_single_table(table_config, sync_start_time):
 
         # 마이그레이션 결과에서 실제 처리된 데이터의 마지막 타임스탬프를 가져옴
         new_last_sync_time = result['max_ts']
+        logging.info(f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}")
+
         # 마지막 동기화 시간을 실제 데이터의 마지막 시간으로 업데이트
         update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
         
@@ -133,30 +139,39 @@ def main_service_loop():
         logging.info(f"  - 테이블: {cfg['table_name']}, PK: {cfg['primary_keys']}")
     logging.info("-----------------------------------------")
 
+    # cycle_status의 초기 상태를 루프 밖에서 설정
+    with cycle_status_lock:
+        for config in enriched_configs:
+            cycle_status["tables"][config['table_name']] = {"status": "pending", "message": "대기"}
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='SyncWorker') as executor:
         while True:
             cycle_start_time = datetime.now()
             logging.info(f"--- 동기화 사이클 시작: {cycle_start_time.isoformat()} ---")
 
-            # 대시보드 데이터 초기화 (진행중 상태로)
+            # 1. 대시보드 데이터 상태를 '진행중'으로 업데이트
             with cycle_status_lock:
                 cycle_status["last_updated"] = cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')
                 for config in enriched_configs:
-                    cycle_status["tables"][config['table_name']] = {"status": "in_progress", "message": "대기중..."}
+                    cycle_status["tables"][config['table_name']].update({"status": "in_progress", "message": "작업 시작 중..."})
             
-            # 초기 대시보드 생성
+            # 2. '진행중' 상태의 대시보드를 생성
             generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
-            # 동기화 작업 제출
+            # 3. 동기화 작업 제출
             futures = [executor.submit(sync_single_table, config, cycle_start_time) for config in enriched_configs]
-            # 모든 작업이 끝날 때까지 기다릴 필요 없이, 다음 주기로 넘어감 (개별 스레드가 상태 업데이트)
-
-            logging.info(f"모든 작업 제출 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
-            time.sleep(SYNC_INTERVAL_SECONDS)
             
-            # 최종 대시보드 업데이트 (선택사항이지만, 모든 작업 완료 후 상태를 보기 위해)
+            # 4. 모든 작업이 완료될 때까지 기다림
+            logging.info("모든 테이블의 동기화 작업이 완료될 때까지 기다립니다...")
+            concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
+            logging.info("모든 동기화 작업이 완료되었습니다.")
+
+            # 5. 최종 결과가 반영된 대시보드를 업데이트
             with cycle_status_lock:
                  generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
+
+            logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
+            time.sleep(SYNC_INTERVAL_SECONDS)
 
 if __name__ == '__main__':
     try:
