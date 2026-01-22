@@ -10,24 +10,24 @@ HTML_TEMPLATE = """
     <meta http-equiv="refresh" content="{refresh_interval}">
     <title>DB Sync Status</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f9; color: #333; }
-        .container { max-width: 1200px; margin: 40px auto; background: white; padding: 25px 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
-        h1, h2 { color: #2c3e50; border-bottom: 2px solid #e9ecef; padding-bottom: 10px; }
-        h1 { font-size: 2em; }
-        h2 { font-size: 1.5em; margin-top: 30px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: 600; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        tr:hover { background-color: #f1f1f1; }
-        .status-success { color: #155724; background-color: #d4edda; }
-        .status-no_data { color: #555; }
-        .status-in_progress { color: #004085; background-color: #cce5ff; }
-        .status-failed { color: #721c24; background-color: #f8d7da; font-weight: bold; }
-        .footer { margin-top: 30px; font-size: 0.9em; color: #777; }
-        .footer ul { padding-left: 20px; }
-        .footer li { margin-bottom: 5px; }
-        .timestamp { font-weight: normal; font-size: 0.9em; color: #555; }
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f9; color: #333; }}
+        .container {{ max-width: 1200px; margin: 40px auto; background: white; padding: 25px 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }}
+        h1, h2 {{ color: #2c3e50; border-bottom: 2px solid #e9ecef; padding-bottom: 10px; }}
+        h1 {{ font-size: 2em; }}
+        h2 {{ font-size: 1.5em; margin-top: 30px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+        th, td {{ padding: 12px 15px; border: 1px solid #ddd; text-align: left; }}
+        th {{ background-color: #f2f2f2; font-weight: 600; }}
+        tr:nth-child(even) {{ background-color: #f9f9f9; }}
+        tr:hover {{ background-color: #f1f1f1; }}
+        .status-success {{ color: #155724; background-color: #d4edda; }}
+        .status-no_data {{ color: #555; }}
+        .status-in_progress {{ color: #004085; background-color: #cce5ff; }}
+        .status-failed {{ color: #721c24; background-color: #f8d7da; font-weight: bold; }}
+        .footer {{ margin-top: 30px; font-size: 0.9em; color: #777; }}
+        .footer ul {{ padding-left: 20px; }}
+        .footer li {{ margin-bottom: 5px; }}
+        .timestamp {{ font-weight: normal; font-size: 0.9em; color: #555; }}
     </style>
 </head>
 <body>
