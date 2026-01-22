@@ -100,12 +100,13 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
 
 def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn):
     """
-    데이터를 마이그레이션하고 처리 결과를 담은 딕셔너리를 반환합니다.
+    데이터를 마이그레이션하고 처리 결과(처리 건수, 오류 건수, 최종 동기화 시간)를 담은 딕셔너리를 반환합니다.
     """
     logging.debug(f"[{table_name}] 기간: {start_date} ~ {end_date}")
 
     total_rows_processed = 0
     total_errors = 0
+    max_ts = start_date  # 현재까지 발견된 가장 최신 타임스탬프
     
     try:
         with source_conn.cursor() as source_cursor:
@@ -114,12 +115,18 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             source_cursor.execute(query, {'start_date': start_date, 'end_date': end_date})
             
             columns = [desc[0] for desc in source_cursor.description]
+            date_column_index = columns.index(date_column_name)
             
             while True:
                 rows = source_cursor.fetchmany(fetchsize)
                 if not rows:
                     break
                 
+                # 현재 청크의 최신 타임스탬프 찾기
+                current_chunk_max_ts = max(row[date_column_index] for row in rows)
+                if current_chunk_max_ts > max_ts:
+                    max_ts = current_chunk_max_ts
+
                 chunk_size = len(rows)
                 logging.info(f"[{table_name}] {chunk_size}건 데이터 추출. 타겟에 적재합니다.")
                 
@@ -132,7 +139,7 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             else:
                 logging.info(f"[{table_name}] 총 {total_rows_processed}건 처리 완료 (성공: {total_rows_processed - total_errors}, 실패: {total_errors}).")
             
-            return {"processed": total_rows_processed, "errors": total_errors}
+            return {"processed": total_rows_processed, "errors": total_errors, "max_ts": max_ts}
 
     except cx_Oracle.Error as e:
         logging.error(f"[{table_name}] 마이그레이션 중 DB 오류 발생: {e}")

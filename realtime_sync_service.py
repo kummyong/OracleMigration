@@ -90,7 +90,10 @@ def sync_single_table(table_config, sync_start_time):
             source_conn=source_conn, target_conn=target_conn
         )
 
-        update_last_sync_time(table_name, sync_start_time, file_update_lock)
+        # 마이그레이션 결과에서 실제 처리된 데이터의 마지막 타임스탬프를 가져옴
+        new_last_sync_time = result['max_ts']
+        # 마지막 동기화 시간을 실제 데이터의 마지막 시간으로 업데이트
+        update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
         
         status_update.update({
             "status": "success" if result["processed"] > 0 else "no_data",
