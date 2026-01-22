@@ -106,7 +106,7 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
 
     total_rows_processed = 0
     total_errors = 0
-    max_ts = start_date  # 현재까지 발견된 가장 최신 타임스탬프
+    max_ts = start_date  # 현재까지 발견된 가장 최신 타임스탬프...
     
     try:
         with source_conn.cursor() as source_cursor:
