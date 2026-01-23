@@ -16,10 +16,19 @@ from dashboard_generator import generate_html_dashboard
 SYNC_INTERVAL_SECONDS = 10 
 MAX_WORKERS = 10
 FETCH_SIZE = 1000
+MAX_CONSECUTIVE_FAILURES = 3 # 연속 실패 허용 횟수
 # -------------------- #
 
 log_format = '%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
+    with cycle_status_lock:
+        for config in enriched_configs:
+            cycle_status["tables"][config['table_name']] = {
+                "status": "pending", 
+                "message": "대기",
+                "consecutive_failures": 0, # 연속 실패 횟수
+                "skipped": False # 데이터 건너뛰기 여부
+            }
 
 # 스레드간 공유 데이터 보호를 위한 Lock
 file_update_lock = threading.Lock() # 동기화 시간 파일용
@@ -76,9 +85,10 @@ def sync_single_table(table_config, sync_start_time):
     table_name = table_config['table_name']
     start_op_time = time.monotonic()
     
-    status_update = {"status": "in_progress", "message": "작업 시작"}
+    # 초기에 상태를 '진행중'으로 설정
     with cycle_status_lock:
-        cycle_status["tables"][table_name] = status_update
+        current_status = cycle_status["tables"][table_name]
+        current_status.update({"status": "in_progress", "message": "작업 시작"})
 
     source_conn, target_conn = None, None
     try:
@@ -96,33 +106,66 @@ def sync_single_table(table_config, sync_start_time):
             source_conn=source_conn, target_conn=target_conn
         )
 
-        # 마이그레이션 결과에서 실제 처리된 데이터의 마지막 타임스탬프를 가져옴
-        new_last_sync_time = result['max_ts']
-        logging.info(f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}")
+        with cycle_status_lock:
+            current_status = cycle_status["tables"][table_name]
+            if result["errors"] == 0:
+                # 성공 시
+                new_last_sync_time = result['max_ts']
+                update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
+                logging.info(f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}")
+                
+                current_status.update({
+                    "status": "success" if result["processed"] > 0 else "no_data",
+                    "processed": result["processed"],
+                    "errors": 0,
+                    "message": f"성공 (처리: {result['processed']})" if result["processed"] > 0 else "변경 데이터 없음",
+                    "consecutive_failures": 0 # 성공 시 카운터 리셋
+                })
+            else:
+                # 오류 발생 시
+                current_status["consecutive_failures"] += 1
+                logging.warning(f"[{table_name}] 오류 발생. 연속 실패 횟수: {current_status['consecutive_failures']}")
 
-        # 마지막 동기화 시간을 실제 데이터의 마지막 시간으로 업데이트
-        update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
-        
-        status_update.update({
-            "status": "success" if result["processed"] > 0 else "no_data",
-            "processed": result["processed"],
-            "errors": result["errors"],
-            "message": f"성공 (처리: {result['processed'] - result['errors']}, 오류: {result['errors']})" if result["processed"] > 0 else "변경 데이터 없음"
-        })
+                if current_status["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES:
+                    # 최대 실패 횟수 도달 - 서킷 브레이커 작동
+                    logging.critical(
+                        f"[{table_name}] 최대 연속 실패 횟수({MAX_CONSECUTIVE_FAILURES})에 도달했습니다. "
+                        f"문제가 되는 데이터 구간을 건너뛰고 다음 사이클부터 정상 진행을 시도합니다. "
+                        f"마지막 동기화 시간을 현재 사이클 시간({sync_start_time.isoformat()})으로 강제 업데이트합니다."
+                    )
+                    
+                    # 동기화 시간을 강제로 현재 사이클 시간으로 업데이트하여 문제 구간을 건너뜀
+                    update_last_sync_time(table_name, sync_start_time, file_update_lock)
+                    
+                    current_status.update({
+                        "status": "persistent_failure",
+                        "processed": result["processed"], # 이번 주기에 처리 시도한 내용
+                        "errors": result["errors"],
+                        "message": f"영구 실패: {result['errors']}개 오류. 데이터 구간을 건너뛰었습니다.",
+                        "consecutive_failures": 0 # 다음 정상 처리를 위해 리셋
+                    })
+                else:
+                    # 아직 재시도 횟수가 남음
+                    current_status.update({
+                        "status": "failed",
+                        "processed": result["processed"],
+                        "errors": result["errors"],
+                        "message": f"일시적 실패: {result['errors']}개 오류. 다음 사이클에 재시도합니다."
+                    })
 
     except Exception as e:
         error_message = f"오류 발생: {str(e)}"
-        logging.error(f"[{table_name}] 작업 실패. {error_message}")
-        status_update.update({"status": "failed", "message": error_message})
+        logging.error(f"[{table_name}] 작업 실패. {error_message}", exc_info=True)
+        with cycle_status_lock:
+             cycle_status["tables"][table_name].update({"status": "failed", "message": error_message})
     finally:
         if source_conn: source_conn.close()
         if target_conn: target_conn.close()
         
         duration = time.monotonic() - start_op_time
-        status_update["duration"] = duration
-        
         with cycle_status_lock:
-            cycle_status["tables"][table_name].update(status_update)
+            cycle_status["tables"][table_name]["duration"] = duration
+            # 대시보드는 각 테이블 작업이 끝날 때마다 항상 업데이트
             generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
 def main_service_loop():

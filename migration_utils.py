@@ -151,8 +151,6 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 
                 # 현재 청크의 최신 타임스탬프 찾기
                 current_chunk_max_ts = max(row[date_column_index] for row in rows)
-                if current_chunk_max_ts > max_ts:
-                    max_ts = current_chunk_max_ts
 
                 chunk_size = len(rows)
                 logging.info(f"[{table_name}] {chunk_size}건 데이터 추출. 타겟에 적재합니다.")
@@ -160,6 +158,13 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 successful_rows_in_chunk, errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)
                 total_errors += errors_in_chunk
                 total_rows_processed += successful_rows_in_chunk
+
+                # 오류가 없는 경우에만 현재까지 처리된 데이터의 가장 최신 시간으로 max_ts를 업데이트
+                if errors_in_chunk == 0:
+                    if current_chunk_max_ts > max_ts:
+                        max_ts = current_chunk_max_ts
+                else:
+                    logging.warning(f"[{table_name}] 이번 청크에서 오류가 발생하여 최종 동기화 시간을 업데이트하지 않습니다. 다음 사이클에서 재시도됩니다.")
 
             if total_rows_processed == 0:
                 logging.info(f"[{table_name}] 기간 내 변경된 데이터가 없습니다.")

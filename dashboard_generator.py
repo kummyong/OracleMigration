@@ -24,6 +24,7 @@ HTML_TEMPLATE = """
         .status-no_data {{ color: #555; }}
         .status-in_progress {{ color: #004085; background-color: #cce5ff; }}
         .status-failed {{ color: #721c24; background-color: #f8d7da; font-weight: bold; }}
+        .status-persistent_failure {{ color: #fff; background-color: #dc3545; font-weight: bold; }}
         .footer {{ margin-top: 30px; font-size: 0.9em; color: #777; }}
         .footer ul {{ padding-left: 20px; }}
         .footer li {{ margin-bottom: 5px; }}
@@ -59,7 +60,8 @@ HTML_TEMPLATE = """
                 <li><strong style="color:#155724;">성공</strong>: 기간 내 변경 데이터를 성공적으로 동기화했습니다.</li>
                 <li><strong style="color:#555;">변경 없음</strong>: 기간 내 변경된 데이터가 없습니다.</li>
                 <li><strong style="color:#004085;">진행중</strong>: 현재 동기화 작업이 진행중입니다.</li>
-                <li><strong style="color:#721c24;">실패</strong>: 동기화 중 오류가 발생했습니다. 콘솔 로그를 확인하세요.</li>
+                <li><strong style="color:#721c24;">일시적 실패</strong>: 동기화 중 오류가 발생했습니다. 다음 주기에 재시도합니다.</li>
+                <li><strong style="color:#dc3545;">영구 실패</strong>: 반복적인 오류로 인해 특정 데이터 구간을 건너뛰었습니다. 로그 확인이 필요합니다.</li>
             </ul>
         </div>
     </div>
@@ -79,8 +81,9 @@ def generate_html_dashboard(status_data, interval, output_path):
         status_text = {
             'success': '성공',
             'no_data': '변경 없음',
-            'failed': '실패',
-            'in_progress': '진행중'
+            'failed': '일시적 실패',
+            'in_progress': '진행중',
+            'persistent_failure': '영구 실패'
         }.get(data.get('status'), '알 수 없음')
         
         row = f"""
