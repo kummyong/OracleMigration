@@ -10,7 +10,7 @@ import concurrent.futures
 from logging.handlers import RotatingFileHandler
 
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, TABLES_CONFIG_FILE, DASHBOARD_FILE
-from database import get_db_connection, get_primary_keys
+from database import get_db_connection, get_upsert_keys
 from migration_utils import migrate, get_last_sync_time, update_last_sync_time
 from dashboard_generator import generate_html_dashboard
 
@@ -71,7 +71,7 @@ def load_table_configs():
         return None
 
 def enrich_table_configs(configs):
-    """테이블 설정에 PK 정보가 없으면 DB에서 조회하여 채워넣습니다. PK가 없으면 빈 리스트로 설정합니다."""
+    """테이블 설정에 PK/UK 정보가 없으면 DB에서 조회하여 채워넣습니다."""
     enriched_configs = []
     source_conn = None
     try:
@@ -79,16 +79,16 @@ def enrich_table_configs(configs):
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
         for config in configs:
             table_name = config['table_name']
-            # PK가 설정 파일에 명시되어 있지 않으면 DB에서 조회 시도
+            # primary_keys가 설정 파일에 명시되어 있지 않으면 DB에서 조회 시도
             if not config.get('primary_keys'):
-                pk_columns = get_primary_keys(source_conn, table_name)
-                if pk_columns:
-                    config['primary_keys'] = pk_columns
+                upsert_keys = get_upsert_keys(source_conn, table_name)
+                if upsert_keys:
+                    config['primary_keys'] = upsert_keys
                 else:
-                    logging.warning(f"[{table_name}] Primary Key를 찾을 수 없습니다. (PK 없이 INSERT 모드로 진행)")
-                    config['primary_keys'] = [] # PK가 없으면 빈 리스트로 설정
+                    logging.warning(f"[{table_name}] Primary Key 또는 Unique Key를 찾을 수 없습니다. (PK 없이 INSERT 모드로 진행)")
+                    config['primary_keys'] = [] # PK/UK가 없으면 빈 리스트로 설정
             
-            # PK 유무와 관계없이 모든 테이블을 동기화 대상에 추가
+            # 키 유무와 관계없이 모든 테이블을 동기화 대상에 추가
             enriched_configs.append(config)
             
     except Exception as e:
@@ -201,7 +201,7 @@ def main_service_loop():
 
     logging.info(f"--- 총 {len(enriched_configs)}개 테이블 동기화 준비 완료 ---")
     for cfg in enriched_configs:
-        logging.info(f"  - 테이블: {cfg['table_name']}, PK: {cfg['primary_keys']}")
+        logging.info(f"  - 테이블: {cfg['table_name']}, Upsert Keys: {cfg['primary_keys']}")
     logging.info("-----------------------------------------")
 
     # cycle_status의 초기 상태를 루프 밖에서 설정
