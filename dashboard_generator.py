@@ -91,6 +91,28 @@ def generate_html_dashboard(status_data, interval, output_path):
     table_rows = []
     # 테이블 이름을 기준으로 정렬하여 항상 같은 순서로 보이도록 함
     sorted_tables = sorted(status_data.get('tables', {}).items())
+    
+    for table_name, data in sorted_tables:
+        status_text = data.get('status', 'pending')
+        message = data.get('message', '대기')
+        status_class = f"status-{status_text}"
+
+        duration = f"{data.get('duration', 0):.2f}" if data.get('duration') is not None else "N/A"
+        processed = data.get('processed', '')
+        errors = data.get('errors', '')
+
+        row = f"""
+        <tr>
+            <td>{table_name}</td>
+            <td class="{status_class}">{status_text}</td>
+            <td>{processed if processed != '' else 'N/A'}</td>
+            <td>{errors if errors != '' else '0'}</td>
+            <td>{duration}</td>
+            <td>{message}</td>
+        </tr>
+        """
+        table_rows.append(row)
+
     html_content = HTML_TEMPLATE.format(
         refresh_interval=interval,
         last_updated=status_data.get('last_updated', 'N/A'),

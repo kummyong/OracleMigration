@@ -21,9 +21,13 @@ FETCH_SIZE = 1000
 MAX_CONSECUTIVE_FAILURES = 3 # 연속 실패 허용 횟수
 # -------------------- #
 
+# 스크립트의 절대 경로를 기준으로 파일 경로 설정
+SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
+DASHBOARD_ABS_PATH = os.path.join(SCRIPT_DIR, DASHBOARD_FILE)
+
 def setup_logging():
     """로그 설정을 초기화합니다. 콘솔과 파일에 모두 로그를 남깁니다."""
-    log_dir = "logs"
+    log_dir = os.path.join(SCRIPT_DIR, "logs")
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -185,7 +189,7 @@ def sync_single_table(table_config, sync_start_time):
         with cycle_status_lock:
             cycle_status["tables"][table_name]["duration"] = duration
             # 대시보드는 각 테이블 작업이 끝날 때마다 항상 업데이트
-            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
+            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
 
 def main_service_loop():
     """메인 서비스 루프. 주기적으로 모든 테이블의 동기화를 트리거하고 대시보드를 생성합니다."""
@@ -221,7 +225,7 @@ def main_service_loop():
                     cycle_status["tables"][config['table_name']].update({"status": "in_progress", "message": "작업 시작 중..."})
             
             # 2. '진행중' 상태의 대시보드를 생성
-            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
+            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
 
             # 3. 동기화 작업 제출
             futures = [executor.submit(sync_single_table, config, cycle_start_time) for config in enriched_configs]
@@ -240,7 +244,7 @@ def main_service_loop():
                         updated_tables_count += 1
                 
                 cycle_status['updated_tables_count'] = updated_tables_count
-                generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
+                generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
 
 
             logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
