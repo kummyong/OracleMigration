@@ -4,9 +4,6 @@ import os
 from datetime import datetime
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, LAST_SYNC_TIME_FILE
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 def get_db_connection(config):
     """지정된 설정으로 데이터베이스 연결을 생성합니다."""
     try:

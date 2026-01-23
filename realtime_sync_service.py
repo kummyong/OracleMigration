@@ -3,9 +3,11 @@ import logging
 import json
 import time
 import threading
+import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
+from logging.handlers import RotatingFileHandler
 
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, TABLES_CONFIG_FILE, DASHBOARD_FILE
 from database import get_db_connection, get_primary_keys
@@ -19,16 +21,33 @@ FETCH_SIZE = 1000
 MAX_CONSECUTIVE_FAILURES = 3 # 연속 실패 허용 횟수
 # -------------------- #
 
-log_format = '%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'
-logging.basicConfig(level=logging.INFO, format=log_format)
-    with cycle_status_lock:
-        for config in enriched_configs:
-            cycle_status["tables"][config['table_name']] = {
-                "status": "pending", 
-                "message": "대기",
-                "consecutive_failures": 0, # 연속 실패 횟수
-                "skipped": False # 데이터 건너뛰기 여부
-            }
+def setup_logging():
+    """로그 설정을 초기화합니다. 콘솔과 파일에 모두 로그를 남깁니다."""
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_format = '%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'
+    
+    # 루트 로거 설정
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # 기존 핸들러 제거 (재호출 시 중복 방지)
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    # 콘솔 핸들러
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(console_handler)
+
+    # 파일 핸들러 (날짜 기반, 로테이팅)
+    log_file = os.path.join(log_dir, f"sync_service_{datetime.now().strftime('%Y-%m-%d')}.log")
+    # 10MB 크기, 5개 백업
+    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(file_handler)
 
 # 스레드간 공유 데이터 보호를 위한 Lock
 file_update_lock = threading.Lock() # 동기화 시간 파일용
@@ -212,10 +231,23 @@ def main_service_loop():
             concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
             logging.info("모든 동기화 작업이 완료되었습니다.")
 
+            # 5. 최종 집계 및 대시보드 업데이트
+            with cycle_status_lock:
+                updated_tables_count = 0
+                for table_status in cycle_status["tables"].values():
+                    # 성공적으로 처리된 데이터가 있거나, 영구 실패로 건너뛴 경우 '업데이트'로 간주
+                    if table_status.get('status') == 'success' or table_status.get('status') == 'persistent_failure':
+                        updated_tables_count += 1
+                
+                cycle_status['updated_tables_count'] = updated_tables_count
+                generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
+
+
             logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
             time.sleep(SYNC_INTERVAL_SECONDS)
 
 if __name__ == '__main__':
+    setup_logging()
     try:
         main_service_loop()
     except KeyboardInterrupt:

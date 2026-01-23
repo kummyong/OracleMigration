@@ -6,9 +6,6 @@ import json
 from datetime import datetime
 from config import LAST_SYNC_TIME_FILE # 설정 파일에서 동기화 시간 파일 경로 가져오기
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 def get_last_sync_time(table_name):
     """테이블별 마지막 동기화 시간을 JSON 파일에서 읽어옵니다."""
     try:
@@ -50,9 +47,10 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     """
     if not rows:
         logging.debug(f"[{table_name}] 적재할 새로운 데이터가 없습니다.")
-        return 0
+        return 0, 0
 
     num_errors = 0
+    successful_rows = 0
     cols_str = ", ".join(columns)
     bind_vars = ", ".join([f':{i+1}' for i, _ in enumerate(columns)])
 
@@ -70,6 +68,10 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 num_errors = len(errors)
                 if num_errors > 0:
                     logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 INSERT 오류 발생.")
+                    # 상세 오류 로그 추가
+                    for error in errors:
+                        problematic_row = rows[error.offset]
+                        logging.error(f"[{table_name}] INSERT Error: {error.message.strip()} | Data: {problematic_row}")
                 
                 connection.commit()
                 successful_rows = len(rows) - num_errors
@@ -107,7 +109,11 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 
                 if num_errors > 0:
                     logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생.")
-                
+                    # 상세 오류 로그 추가
+                    for error in errors:
+                        problematic_row = rows[error.offset]
+                        logging.error(f"[{table_name}] MERGE Error: {error.message.strip()} | Data: {problematic_row}")
+
                 connection.commit()
                 successful_rows = len(rows) - num_errors
                 if successful_rows > 0:

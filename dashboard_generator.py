@@ -29,6 +29,9 @@ HTML_TEMPLATE = """
         .footer ul {{ padding-left: 20px; }}
         .footer li {{ margin-bottom: 5px; }}
         .timestamp {{ font-weight: normal; font-size: 0.9em; color: #555; }}
+        .summary-box {{ background-color: #e9ecef; padding: 15px 20px; border-radius: 5px; margin-bottom: 25px; border: 1px solid #ced4da; }}
+        .summary-box h2 {{ margin-top: 0; border-bottom: none; font-size: 1.2em; }}
+        .summary-box p {{ margin: 5px 0 0; font-size: 1.1em; }}
     </style>
 </head>
 <body>
@@ -37,6 +40,8 @@ HTML_TEMPLATE = """
         <p class="timestamp">마지막 업데이트: {last_updated}</p>
         <p class="timestamp">동기화 주기: {refresh_interval}초 (페이지 자동 새로고침)</p>
         
+        {summary_section}
+
         <h2>테이블별 동기화 상태</h2>
         <table>
             <thead>
@@ -71,36 +76,25 @@ HTML_TEMPLATE = """
 
 def generate_html_dashboard(status_data, interval, output_path):
     """주어진 상태 데이터로 HTML 대시보드 파일을 생성합니다."""
+
+    updated_tables_count = status_data.get('updated_tables_count')
+    summary_section_html = ""
+    if updated_tables_count is not None and updated_tables_count >= 0:
+        total_tables = len(status_data.get('tables', {}))
+        summary_section_html = f"""
+        <div class="summary-box">
+            <h2>최근 동기화 요약</h2>
+            <p><strong>{updated_tables_count} / {total_tables}</strong> 개 테이블에서 데이터 변경이 감지되어 동기화 시간이 업데이트 되었습니다.</p>
+        </div>
+        """
     
     table_rows = []
     # 테이블 이름을 기준으로 정렬하여 항상 같은 순서로 보이도록 함
     sorted_tables = sorted(status_data.get('tables', {}).items())
-
-    for table_name, data in sorted_tables:
-        status_class = "status-" + data.get('status', 'no_data').lower()
-        status_text = {
-            'success': '성공',
-            'no_data': '변경 없음',
-            'failed': '일시적 실패',
-            'in_progress': '진행중',
-            'persistent_failure': '영구 실패'
-        }.get(data.get('status'), '알 수 없음')
-        
-        row = f"""
-        <tr>
-            <td>{table_name}</td>
-            <td class="{status_class}">{status_text}</td>
-            <td>{data.get('processed', 0):,}</td>
-            <td>{data.get('errors', 0):,}</td>
-            <td>{data.get('duration', 0.0):.2f}</td>
-            <td>{data.get('message', '')}</td>
-        </tr>
-        """
-        table_rows.append(row)
-
     html_content = HTML_TEMPLATE.format(
         refresh_interval=interval,
         last_updated=status_data.get('last_updated', 'N/A'),
+        summary_section=summary_section_html,
         table_rows="\n".join(table_rows)
     )
 
