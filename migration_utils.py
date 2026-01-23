@@ -122,7 +122,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
             connection.rollback()
             raise
     
-    return num_errors
+    return successful_rows, num_errors
 
 
 def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn):
@@ -157,9 +157,9 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 chunk_size = len(rows)
                 logging.info(f"[{table_name}] {chunk_size}건 데이터 추출. 타겟에 적재합니다.")
                 
-                errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)
+                successful_rows_in_chunk, errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)
                 total_errors += errors_in_chunk
-                total_rows_processed += chunk_size
+                total_rows_processed += successful_rows_in_chunk
 
             if total_rows_processed == 0:
                 logging.info(f"[{table_name}] 기간 내 변경된 데이터가 없습니다.")

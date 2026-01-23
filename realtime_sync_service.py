@@ -123,6 +123,7 @@ def sync_single_table(table_config, sync_start_time):
         
         with cycle_status_lock:
             cycle_status["tables"][table_name].update(status_update)
+            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
 def main_service_loop():
     """메인 서비스 루프. 주기적으로 모든 테이블의 동기화를 트리거하고 대시보드를 생성합니다."""
@@ -167,10 +168,6 @@ def main_service_loop():
             logging.info("모든 테이블의 동기화 작업이 완료될 때까지 기다립니다...")
             concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
             logging.info("모든 동기화 작업이 완료되었습니다.")
-
-            # 5. 최종 결과가 반영된 대시보드를 업데이트
-            with cycle_status_lock:
-                 generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_FILE)
 
             logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
             time.sleep(SYNC_INTERVAL_SECONDS)
