@@ -168,17 +168,18 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 total_errors += errors_in_chunk
                 total_rows_processed += successful_rows_in_chunk
 
-                # 오류가 없는 경우에만 현재까지 처리된 데이터의 가장 최신 시간으로 max_ts를 업데이트
-                if errors_in_chunk == 0:
-                    if current_chunk_max_ts > max_ts:
-                        max_ts = current_chunk_max_ts
-                        if update_callback:
-                            try:
-                                update_callback(max_ts)
-                            except Exception as e:
-                                logging.error(f"[{table_name}] 동기화 시간 업데이트 콜백 실패: {e}")
-                else:
-                    logging.warning(f"[{table_name}] 이번 청크에서 오류가 발생하여 최종 동기화 시간을 업데이트하지 않습니다. 다음 사이클에서 재시도됩니다.")
+                # 오류가 있어도 무한 루프 방지를 위해 max_ts를 업데이트합니다.
+                if current_chunk_max_ts > max_ts:
+                    max_ts = current_chunk_max_ts
+                    
+                    if errors_in_chunk > 0:
+                        logging.warning(f"[{table_name}] 이번 청크에서 {errors_in_chunk}건의 오류가 발생했으나, 무한 루프 방지를 위해 동기화 시간을 업데이트합니다. (New Sync Time: {max_ts})")
+                    
+                    if update_callback:
+                        try:
+                            update_callback(max_ts)
+                        except Exception as e:
+                            logging.error(f"[{table_name}] 동기화 시간 업데이트 콜백 실패: {e}")
 
             if total_rows_processed == 0:
                 logging.info(f"[{table_name}] 기간 내 변경된 데이터가 없습니다.")
