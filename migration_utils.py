@@ -16,14 +16,24 @@ def OutputTypeHandler(cursor, name, defaultType, size, precision, scale):
     if defaultType == cx_Oracle.DB_TYPE_BLOB:
         return cursor.var(cx_Oracle.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
 
-def get_last_sync_time(table_name):
+def get_last_sync_time(table_name, lock=None):
     """테이블별 마지막 동기화 시간을 JSON 파일에서 읽어옵니다."""
     try:
-        if os.path.exists(LAST_SYNC_TIME_FILE):
-            with open(LAST_SYNC_TIME_FILE, 'r') as f:
-                times = json.load(f)
-                if table_name in times:
-                    return datetime.fromisoformat(times[table_name])
+        times = {}
+        def _read_file():
+            if os.path.exists(LAST_SYNC_TIME_FILE):
+                with open(LAST_SYNC_TIME_FILE, 'r') as f:
+                    return json.load(f)
+            return {}
+
+        if lock:
+            with lock:
+                times = _read_file()
+        else:
+            times = _read_file()
+
+        if table_name in times:
+            return datetime.fromisoformat(times[table_name])
         # 파일이나 테이블 항목이 없으면 아주 오래된 시간을 반환하여 전체 동기화를 유도
         return datetime(1970, 1, 1)
     except (IOError, json.JSONDecodeError) as e:

@@ -111,7 +111,7 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
     # 초기에 상태를 '진행중'으로 설정
     with cycle_status_lock:
         current_status = cycle_status["tables"][table_name]
-        last_sync_init = get_last_sync_time(table_name)
+        last_sync_init = get_last_sync_time(table_name, file_update_lock)
         current_status.update({
             "status": "in_progress", 
             "message": "작업 시작",
@@ -120,7 +120,7 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
 
     source_conn, target_conn = None, None
     try:
-        last_sync = get_last_sync_time(table_name)
+        last_sync = get_last_sync_time(table_name, file_update_lock)
         logging.info(f"[{table_name}] Previous sync time: {last_sync.isoformat()}")
         logging.info(f"[{table_name}] Current cycle window end: {sync_start_time.isoformat()}")
         
