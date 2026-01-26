@@ -103,6 +103,34 @@ def enrich_table_configs(configs):
             source_conn.close()
     return enriched_configs
 
+def acquire_connection_with_retry(pool, db_label, max_retries=3):
+    """
+    세션 풀에서 연결을 가져오고, 유효성을 검사(ping)합니다.
+    연결이 끊어진 경우 재시도합니다.
+    """
+    last_exception = None
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            conn = pool.acquire()
+            # 가져온 연결이 유효한지 확인 (Ping)
+            conn.ping()
+            return conn
+        except Exception as e:
+            last_exception = e
+            logging.warning(f"[{db_label}] 세션 풀 연결 획득/검증 실패 (시도 {attempt+1}/{max_retries}): {e}")
+            if conn:
+                try:
+                    # 유효하지 않은 연결은 폐기
+                    pool.drop(conn)
+                except Exception:
+                    pass
+            # 잠시 대기 후 재시도
+            time.sleep(1)
+    
+    logging.error(f"[{db_label}] 세션 풀에서 유효한 연결을 가져오는데 실패했습니다.")
+    raise last_exception
+
 def sync_single_table(table_config, sync_start_time, source_pool=None, target_pool=None):
     """단일 테이블 동기화 작업을 수행하고, 대시보드용 상태를 업데이트합니다."""
     table_name = table_config['table_name']
@@ -126,12 +154,12 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
         
         # 풀이 있으면 acquire, 없으면(SQLite 등) 신규 연결
         if source_pool:
-            source_conn = source_pool.acquire()
+            source_conn = acquire_connection_with_retry(source_pool, "Source")
         else:
             source_conn = get_db_connection(SOURCE_DB_CONFIG)
             
         if target_pool:
-            target_conn = target_pool.acquire()
+            target_conn = acquire_connection_with_retry(target_pool, "Target")
         else:
             target_conn = get_db_connection(TARGET_DB_CONFIG)
 
