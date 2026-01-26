@@ -10,7 +10,7 @@ import concurrent.futures
 from logging.handlers import RotatingFileHandler
 
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, TABLES_CONFIG_FILE, DASHBOARD_FILE
-from database import get_db_connection, get_upsert_keys
+from database import get_db_connection, get_upsert_keys, get_session_pool
 from migration_utils import migrate, get_last_sync_time, update_last_sync_time
 from dashboard_generator import generate_html_dashboard
 
@@ -103,7 +103,7 @@ def enrich_table_configs(configs):
             source_conn.close()
     return enriched_configs
 
-def sync_single_table(table_config, sync_start_time):
+def sync_single_table(table_config, sync_start_time, source_pool=None, target_pool=None):
     """단일 테이블 동기화 작업을 수행하고, 대시보드용 상태를 업데이트합니다."""
     table_name = table_config['table_name']
     start_op_time = time.monotonic()
@@ -119,8 +119,16 @@ def sync_single_table(table_config, sync_start_time):
         logging.info(f"[{table_name}] Previous sync time: {last_sync.isoformat()}")
         logging.info(f"[{table_name}] Current cycle window end: {sync_start_time.isoformat()}")
         
-        source_conn = get_db_connection(SOURCE_DB_CONFIG)
-        target_conn = get_db_connection(TARGET_DB_CONFIG)
+        # 풀이 있으면 acquire, 없으면(SQLite 등) 신규 연결
+        if source_pool:
+            source_conn = source_pool.acquire()
+        else:
+            source_conn = get_db_connection(SOURCE_DB_CONFIG)
+            
+        if target_pool:
+            target_conn = target_pool.acquire()
+        else:
+            target_conn = get_db_connection(TARGET_DB_CONFIG)
 
         # 중간 저장을 위한 콜백 함수 정의
         def _sync_progress_callback(current_max_ts):
@@ -188,8 +196,16 @@ def sync_single_table(table_config, sync_start_time):
         with cycle_status_lock:
              cycle_status["tables"][table_name].update({"status": "failed", "message": error_message})
     finally:
-        if source_conn: source_conn.close()
-        if target_conn: target_conn.close()
+        # 풀에서 가져온 경우 release, 직접 연결한 경우 close
+        if source_pool and source_conn:
+            source_pool.release(source_conn)
+        elif source_conn:
+            source_conn.close()
+            
+        if target_pool and target_conn:
+            target_pool.release(target_conn)
+        elif target_conn:
+            target_conn.close()
         
         duration = time.monotonic() - start_op_time
         with cycle_status_lock:
@@ -219,47 +235,58 @@ def main_service_loop():
         for config in enriched_configs:
             cycle_status["tables"][config['table_name']] = {"status": "pending", "message": "대기"}
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='SyncWorker') as executor:
-        while True:
-            cycle_start_time = datetime.now()
-            logging.info(f"--- 동기화 사이클 시작: {cycle_start_time.isoformat()} ---")
+    # 세션 풀 초기화 (Oracle의 경우 효율적인 연결 관리를 위함)
+    source_pool = None
+    target_pool = None
+    try:
+        source_pool = get_session_pool(SOURCE_DB_CONFIG, min_conn=2, max_conn=MAX_WORKERS)
+        target_pool = get_session_pool(TARGET_DB_CONFIG, min_conn=2, max_conn=MAX_WORKERS)
 
-            # 1. 대시보드 데이터 상태를 '진행중'으로 업데이트
-            with cycle_status_lock:
-                cycle_status["last_updated"] = cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')
-                for config in enriched_configs:
-                    cycle_status["tables"][config['table_name']].update({"status": "in_progress", "message": "작업 시작 중..."})
-            
-            # 2. '진행중' 상태의 대시보드를 생성
-            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='SyncWorker') as executor:
+            while True:
+                cycle_start_time = datetime.now()
+                logging.info(f"--- 동기화 사이클 시작: {cycle_start_time.isoformat()} ---")
 
-            # 3. 동기화 작업 제출
-            futures = [executor.submit(sync_single_table, config, cycle_start_time) for config in enriched_configs]
-            
-            # 4. 모든 작업이 완료될 때까지 기다림
-            logging.info("모든 테이블의 동기화 작업이 완료될 때까지 기다립니다...")
-            concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
-            logging.info("모든 동기화 작업이 완료되었습니다.")
-
-            # 사이클 소요 시간 계산
-            cycle_end_time = datetime.now()
-            cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-
-            # 5. 최종 집계 및 대시보드 업데이트
-            with cycle_status_lock:
-                cycle_status['cycle_duration'] = cycle_duration
-                updated_tables_count = 0
-                for table_status in cycle_status["tables"].values():
-                    # 성공적으로 처리된 데이터가 있거나, 영구 실패로 건너뛴 경우 '업데이트'로 간주
-                    if table_status.get('status') == 'success' or table_status.get('status') == 'persistent_failure':
-                        updated_tables_count += 1
+                # 1. 대시보드 데이터 상태를 '진행중'으로 업데이트
+                with cycle_status_lock:
+                    cycle_status["last_updated"] = cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')
+                    for config in enriched_configs:
+                        cycle_status["tables"][config['table_name']].update({"status": "in_progress", "message": "작업 시작 중..."})
                 
-                cycle_status['updated_tables_count'] = updated_tables_count
+                # 2. '진행중' 상태의 대시보드를 생성
                 generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
 
+                # 3. 동기화 작업 제출 (세션 풀 전달)
+                futures = [executor.submit(sync_single_table, config, cycle_start_time, source_pool, target_pool) for config in enriched_configs]
+                
+                # 4. 모든 작업이 완료될 때까지 기다림
+                logging.info("모든 테이블의 동기화 작업이 완료될 때까지 기다립니다...")
+                concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
+                logging.info("모든 동기화 작업이 완료되었습니다.")
 
-            logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
-            time.sleep(SYNC_INTERVAL_SECONDS)
+                # 사이클 소요 시간 계산
+                cycle_end_time = datetime.now()
+                cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+
+                # 5. 최종 집계 및 대시보드 업데이트
+                with cycle_status_lock:
+                    cycle_status['cycle_duration'] = cycle_duration
+                    updated_tables_count = 0
+                    for table_status in cycle_status["tables"].values():
+                        # 성공적으로 처리된 데이터가 있거나, 영구 실패로 건너뛴 경우 '업데이트'로 간주
+                        if table_status.get('status') == 'success' or table_status.get('status') == 'persistent_failure':
+                            updated_tables_count += 1
+                    
+                    cycle_status['updated_tables_count'] = updated_tables_count
+                    generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+
+
+                logging.info(f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다.")
+                time.sleep(SYNC_INTERVAL_SECONDS)
+    finally:
+        if source_pool: source_pool.close()
+        if target_pool: target_pool.close()
+        logging.info("데이터베이스 세션 풀이 종료되었습니다.")
 
 if __name__ == '__main__':
     setup_logging()

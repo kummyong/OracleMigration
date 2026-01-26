@@ -32,6 +32,30 @@ def get_db_connection(config):
         logging.error(f"Oracle DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
         raise
 
+def get_session_pool(config, min_conn=1, max_conn=10):
+    """지정된 설정으로 Oracle 세션 풀을 생성합니다. SQLite의 경우 None을 반환합니다."""
+    if 'db_file' in config:
+        return None
+
+    if cx_Oracle is None:
+        raise ImportError("cx_Oracle 패키지가 없어 세션 풀을 생성할 수 없습니다.")
+
+    try:
+        pool = cx_Oracle.SessionPool(
+            user=config['user'],
+            password=config['password'],
+            dsn=config['dsn'],
+            min=min_conn,
+            max=max_conn,
+            increment=1,
+            encoding="UTF-8"
+        )
+        logging.info(f"Oracle 세션 풀이 생성되었습니다. (DSN: {config['dsn']}, Max: {max_conn})")
+        return pool
+    except cx_Oracle.Error as e:
+        logging.error(f"세션 풀 생성 중 오류 발생: {e}")
+        raise
+
 def get_upsert_keys(connection, table_name):
     """
     소스 DB의 데이터 딕셔너리를 조회하여 테이블의 Upsert에 사용할 키 컬럼 목록을 반환합니다.
