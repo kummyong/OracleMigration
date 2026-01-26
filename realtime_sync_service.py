@@ -111,7 +111,12 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
     # 초기에 상태를 '진행중'으로 설정
     with cycle_status_lock:
         current_status = cycle_status["tables"][table_name]
-        current_status.update({"status": "in_progress", "message": "작업 시작"})
+        last_sync_init = get_last_sync_time(table_name)
+        current_status.update({
+            "status": "in_progress", 
+            "message": "작업 시작",
+            "last_sync_time": last_sync_init.strftime('%Y-%m-%d %H:%M:%S')
+        })
 
     source_conn, target_conn = None, None
     try:
@@ -145,9 +150,13 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
 
         with cycle_status_lock:
             current_status = cycle_status["tables"][table_name]
+            new_last_sync_time = result['max_ts']
+            
+            # 대시보드에 표시할 시간 업데이트 (오류 발생 시에도 처리된 지점까지 표시)
+            current_status["last_sync_time"] = new_last_sync_time.strftime('%Y-%m-%d %H:%M:%S')
+
             if result["errors"] == 0:
                 # 성공 시
-                new_last_sync_time = result['max_ts']
                 update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
                 logging.info(f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}")
                 
@@ -179,6 +188,7 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
                         "processed": result["processed"], # 이번 주기에 처리 시도한 내용
                         "errors": result["errors"],
                         "message": f"영구 실패: {result['errors']}개 오류. 데이터 구간을 건너뛰었습니다.",
+                        "last_sync_time": sync_start_time.strftime('%Y-%m-%d %H:%M:%S'),
                         "consecutive_failures": 0 # 다음 정상 처리를 위해 리셋
                     })
                 else:

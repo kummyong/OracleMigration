@@ -48,6 +48,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <th>테이블명</th>
                     <th>상태</th>
+                    <th>최종 데이터 시간</th>
                     <th>처리 건수</th>
                     <th>오류 건수</th>
                     <th>소요 시간(초)</th>
@@ -104,11 +105,13 @@ def generate_html_dashboard(status_data, interval, output_path):
         duration = f"{data.get('duration', 0):.2f}" if data.get('duration') is not None else "N/A"
         processed = data.get('processed', '')
         errors = data.get('errors', '')
+        last_sync = data.get('last_sync_time', 'N/A')
 
         row = f"""
         <tr>
             <td>{table_name}</td>
             <td class="{status_class}">{status_text}</td>
+            <td style="font-family: monospace;">{last_sync}</td>
             <td>{processed if processed != '' else 'N/A'}</td>
             <td>{errors if errors != '' else '0'}</td>
             <td>{duration}</td>
