@@ -9,6 +9,13 @@ import json
 from datetime import datetime
 from config import LAST_SYNC_TIME_FILE # 설정 파일에서 동기화 시간 파일 경로 가져오기
 
+def OutputTypeHandler(cursor, name, defaultType, size, precision, scale):
+    """LOB 데이터를 로케이터가 아닌 실제 값으로 변환하여 가져오는 핸들러"""
+    if defaultType == cx_Oracle.DB_TYPE_CLOB:
+        return cursor.var(cx_Oracle.DB_TYPE_LONG, arraysize=cursor.arraysize)
+    if defaultType == cx_Oracle.DB_TYPE_BLOB:
+        return cursor.var(cx_Oracle.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
+
 def get_last_sync_time(table_name):
     """테이블별 마지막 동기화 시간을 JSON 파일에서 읽어옵니다."""
     try:
@@ -160,6 +167,10 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
     
     try:
         with source_conn.cursor() as source_cursor:
+            # LOB 핸들러 등록 (ORA-64219 방지)
+            if cx_Oracle:
+                source_cursor.outputtypehandler = OutputTypeHandler
+                
             query = f"SELECT * FROM {table_name} WHERE {date_column_name} >= :start_date AND {date_column_name} < :end_date"
             
             source_cursor.execute(query, {'start_date': start_date, 'end_date': end_date})
