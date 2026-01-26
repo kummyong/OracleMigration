@@ -97,10 +97,21 @@ def generate_html_dashboard(status_data, interval, output_path):
     # 테이블 이름을 기준으로 정렬하여 항상 같은 순서로 보이도록 함
     sorted_tables = sorted(status_data.get('tables', {}).items())
     
+    # 상태 텍스트 한글화 매핑
+    status_map = {
+        'pending': '대기',
+        'in_progress': '진행중',
+        'success': '성공',
+        'no_data': '변경 없음',
+        'failed': '일시적 실패',
+        'persistent_failure': '영구 실패'
+    }
+    
     for table_name, data in sorted_tables:
-        status_text = data.get('status', 'pending')
+        status_key = data.get('status', 'pending')
+        status_text = status_map.get(status_key, status_key) # 한글 변환, 없으면 원본 사용
         message = data.get('message', '대기')
-        status_class = f"status-{status_text}"
+        status_class = f"status-{status_key}"
 
         duration = f"{data.get('duration', 0):.2f}" if data.get('duration') is not None else "N/A"
         processed = data.get('processed', '')
