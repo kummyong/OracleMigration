@@ -81,6 +81,7 @@ def generate_html_dashboard(status_data, interval, output_path):
     cycle_duration = status_data.get('cycle_duration')
     duration_text = f"{cycle_duration:.2f}초" if cycle_duration is not None else "진행 중..."
 
+    summary_section_html = ""
     if updated_tables_count is not None and updated_tables_count >= 0:
         total_tables = len(status_data.get('tables', {}))
         summary_section_html = f"""
