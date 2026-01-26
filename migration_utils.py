@@ -68,13 +68,20 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 """
                 cursor.executemany(insert_sql, rows, batcherrors=True)
                 errors = cursor.getbatcherrors()
-                num_errors = len(errors)
-                if num_errors > 0:
-                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 INSERT 오류 발생.")
-                    # 상세 오류 로그 추가
-                    for error in errors:
+                
+                real_errors_count = 0
+                for error in errors:
+                    # ORA-00001: Unique constraint violated (중복 무시)
+                    if error.code == 1:
+                        logging.info(f"[{table_name}] 중복 데이터 건너뜀 (ORA-00001) - Offset: {error.offset}")
+                    else:
+                        real_errors_count += 1
                         problematic_row = rows[error.offset]
-                        logging.error(f"[{table_name}] INSERT Error: {error.message.strip()} | Data: {problematic_row}")
+                        logging.error(f"[{table_name}] INSERT Error {error.code}: {error.message.strip()} | Data: {problematic_row}")
+                
+                num_errors = real_errors_count
+                if num_errors > 0:
+                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 INSERT 오류 발생 (중복 제외).")
                 
                 connection.commit()
                 successful_rows = len(rows) - num_errors
@@ -108,14 +115,21 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 """
                 cursor.executemany(merge_sql, rows, batcherrors=True)
                 errors = cursor.getbatcherrors()
-                num_errors = len(errors)
+                
+                real_errors_count = 0
+                for error in errors:
+                    # ORA-00001: Unique constraint violated (MERGE에서도 발생 가능, 무시)
+                    if error.code == 1:
+                        logging.info(f"[{table_name}] 중복 데이터 건너뜀 (ORA-00001, MERGE) - Offset: {error.offset}")
+                    else:
+                        real_errors_count += 1
+                        problematic_row = rows[error.offset]
+                        logging.error(f"[{table_name}] MERGE Error {error.code}: {error.message.strip()} | Data: {problematic_row}")
+
+                num_errors = real_errors_count
                 
                 if num_errors > 0:
-                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생.")
-                    # 상세 오류 로그 추가
-                    for error in errors:
-                        problematic_row = rows[error.offset]
-                        logging.error(f"[{table_name}] MERGE Error: {error.message.strip()} | Data: {problematic_row}")
+                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생 (중복 제외).")
 
                 connection.commit()
                 successful_rows = len(rows) - num_errors
