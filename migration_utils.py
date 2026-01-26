@@ -65,6 +65,22 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     bind_vars = ", ".join([f':{i+1}' for i, _ in enumerate(columns)])
 
     with connection.cursor() as cursor:
+        # 데이터 타입에 따른 입력 사이즈 명시 (ORA-01461 방지)
+        if rows and cx_Oracle:
+            try:
+                input_sizes = []
+                for val in rows[0]:
+                    if isinstance(val, str):
+                        # 2000바이트 초과 시 LONG 타입으로 바인딩 유도
+                        input_sizes.append(cx_Oracle.DB_TYPE_LONG if len(val) > 2000 else cx_Oracle.DB_TYPE_VARCHAR)
+                    elif isinstance(val, bytes):
+                        input_sizes.append(cx_Oracle.DB_TYPE_LONG_RAW if len(val) > 2000 else cx_Oracle.DB_TYPE_RAW)
+                    else:
+                        input_sizes.append(None)
+                cursor.setinputsizes(*input_sizes)
+            except Exception as e:
+                logging.debug(f"[{table_name}] setinputsizes 설정 중 오류 (무시하고 진행): {e}")
+
         try:
             if not p_keys:
                 # No primary keys, use simple INSERT
