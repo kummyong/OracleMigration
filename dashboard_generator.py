@@ -78,13 +78,16 @@ def generate_html_dashboard(status_data, interval, output_path):
     """주어진 상태 데이터로 HTML 대시보드 파일을 생성합니다."""
 
     updated_tables_count = status_data.get('updated_tables_count')
-    summary_section_html = ""
+    cycle_duration = status_data.get('cycle_duration')
+    duration_text = f"{cycle_duration:.2f}초" if cycle_duration is not None else "진행 중..."
+
     if updated_tables_count is not None and updated_tables_count >= 0:
         total_tables = len(status_data.get('tables', {}))
         summary_section_html = f"""
         <div class="summary-box">
             <h2>최근 동기화 요약</h2>
             <p><strong>{updated_tables_count} / {total_tables}</strong> 개 테이블에서 데이터 변경이 감지되어 동기화 시간이 업데이트 되었습니다.</p>
+            <p style="margin-top: 10px;"><strong>사이클 소요 시간:</strong> {duration_text}</p>
         </div>
         """
     

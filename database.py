@@ -1,4 +1,8 @@
-import cx_Oracle
+try:
+    import cx_Oracle
+except ImportError:
+    cx_Oracle = None
+import sqlite3
 import logging
 import os
 from datetime import datetime
@@ -6,16 +10,26 @@ from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, LAST_SYNC_TIME_FILE
 
 def get_db_connection(config):
     """지정된 설정으로 데이터베이스 연결을 생성합니다."""
+    # SQLite 처리
+    if 'db_file' in config:
+        conn = sqlite3.connect(config['db_file'])
+        logging.info(f"성공적으로 SQLite DB에 연결되었습니다. (파일: {config['db_file']})")
+        return conn
+
+    # Oracle 처리
+    if cx_Oracle is None:
+        raise ImportError("cx_Oracle 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
+        
     try:
         conn = cx_Oracle.connect(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn']
         )
-        logging.info(f"성공적으로 DB에 연결되었습니다. (DSN: {config['dsn']})")
+        logging.info(f"성공적으로 Oracle DB에 연결되었습니다. (DSN: {config['dsn']})")
         return conn
     except cx_Oracle.Error as e:
-        logging.error(f"DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
+        logging.error(f"Oracle DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
         raise
 
 def get_upsert_keys(connection, table_name):

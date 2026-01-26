@@ -1,5 +1,8 @@
 # migration_utils.py
-import cx_Oracle
+try:
+    import cx_Oracle
+except ImportError:
+    cx_Oracle = None
 import logging
 import os
 import json
@@ -131,7 +134,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     return successful_rows, num_errors
 
 
-def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn):
+def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None):
     """
     데이터를 마이그레이션하고 처리 결과(처리 건수, 오류 건수, 최종 동기화 시간)를 담은 딕셔너리를 반환합니다.
     """
@@ -169,6 +172,11 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 if errors_in_chunk == 0:
                     if current_chunk_max_ts > max_ts:
                         max_ts = current_chunk_max_ts
+                        if update_callback:
+                            try:
+                                update_callback(max_ts)
+                            except Exception as e:
+                                logging.error(f"[{table_name}] 동기화 시간 업데이트 콜백 실패: {e}")
                 else:
                     logging.warning(f"[{table_name}] 이번 청크에서 오류가 발생하여 최종 동기화 시간을 업데이트하지 않습니다. 다음 사이클에서 재시도됩니다.")
 

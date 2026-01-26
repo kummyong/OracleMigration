@@ -1,15 +1,7 @@
 [
     {
         "table_name": "SALES",
+        "primary_keys": ["ID"],
         "date_column": "SALE_TIMESTAMP"
-    },
-    {
-        "table_name": "CUSTOMER_INFO",
-        "date_column": "MODIFIED_AT"
-    },
-    {
-        "table_name": "PRODUCTS",
-        "primary_keys": ["PRODUCT_CODE"],
-        "date_column": "UPDATE_DATE"
     }
 ]

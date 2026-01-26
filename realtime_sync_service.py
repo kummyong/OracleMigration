@@ -122,11 +122,17 @@ def sync_single_table(table_config, sync_start_time):
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
         target_conn = get_db_connection(TARGET_DB_CONFIG)
 
+        # 중간 저장을 위한 콜백 함수 정의
+        def _sync_progress_callback(current_max_ts):
+            update_last_sync_time(table_name, current_max_ts, file_update_lock)
+            logging.debug(f"[{table_name}] 중간 동기화 시간 저장: {current_max_ts.isoformat()}")
+
         result = migrate(
             table_name=table_name, p_keys=table_config['primary_keys'],
             date_column_name=table_config['date_column'], fetchsize=FETCH_SIZE,
             start_date=last_sync, end_date=sync_start_time,
-            source_conn=source_conn, target_conn=target_conn
+            source_conn=source_conn, target_conn=target_conn,
+            update_callback=_sync_progress_callback
         )
 
         with cycle_status_lock:
@@ -235,8 +241,13 @@ def main_service_loop():
             concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
             logging.info("모든 동기화 작업이 완료되었습니다.")
 
+            # 사이클 소요 시간 계산
+            cycle_end_time = datetime.now()
+            cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+
             # 5. 최종 집계 및 대시보드 업데이트
             with cycle_status_lock:
+                cycle_status['cycle_duration'] = cycle_duration
                 updated_tables_count = 0
                 for table_status in cycle_status["tables"].values():
                     # 성공적으로 처리된 데이터가 있거나, 영구 실패로 건너뛴 경우 '업데이트'로 간주
