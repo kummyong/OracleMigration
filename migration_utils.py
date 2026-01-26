@@ -104,8 +104,8 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                     update_set = ", ".join([f"T.{col} = S.{col}" for col in update_cols])
                     update_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
                 else:
-                    logging.info(f"[{table_name}] PK 외 업데이트할 컬럼이 없어 WHEN MATCHED 시 UPDATE가 아닌 단순 PK 일치 확인만 수행됩니다.")
-                    update_clause = f"WHEN MATCHED THEN UPDATE SET T.{p_keys[0]} = S.{p_keys[0]}" # Still needs a valid column for update part
+                    logging.info(f"[{table_name}] PK 외 업데이트할 컬럼이 없어 WHEN MATCHED(UPDATE) 절을 생략합니다.")
+                    update_clause = "" # 모든 컬럼이 PK이면 업데이트가 불필요함
 
                 insert_cols = cols_str
                 insert_vals = ", ".join([f"S.{col}" for col in columns])
