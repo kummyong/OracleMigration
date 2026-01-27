@@ -173,7 +173,9 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
             date_column_name=table_config['date_column'], fetchsize=FETCH_SIZE,
             start_date=last_sync, end_date=sync_start_time,
             source_conn=source_conn, target_conn=target_conn,
-            update_callback=_sync_progress_callback
+            update_callback=_sync_progress_callback,
+            hint_index_column=table_config.get('hint_index_column'),
+            index_scan_gap_minutes=table_config.get('index_scan_gap_minutes', 0)
         )
 
         with cycle_status_lock:

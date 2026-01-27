@@ -75,14 +75,15 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     bind_vars = ", ".join([f':{i+1}' for i, _ in enumerate(columns)])
 
     with connection.cursor() as cursor:
-        # 데이터 타입에 따른 입력 사이즈 명시 (ORA-01461 방지)
+        # 데이터 타입에 따른 입력 사이즈 명시 (ORA-01461 방지 및 배치 성능 최적화)
         if rows and cx_Oracle:
             try:
                 input_sizes = []
                 for val in rows[0]:
                     if isinstance(val, str):
-                        # 2000바이트 초과 시 LONG 타입으로 바인딩 유도
-                        input_sizes.append(cx_Oracle.DB_TYPE_LONG if len(val) > 2000 else cx_Oracle.DB_TYPE_VARCHAR)
+                        # ORA-01461 해결: 무조건 VARCHAR로 설정하여 Oracle이 알아서 처리하도록 함.
+                        # 기존에 2000자 초과 시 LONG으로 강제하던 로직이 VARCHAR2 컬럼에 대해 ORA-01461을 유발함.
+                        input_sizes.append(cx_Oracle.DB_TYPE_VARCHAR)
                     elif isinstance(val, bytes):
                         input_sizes.append(cx_Oracle.DB_TYPE_LONG_RAW if len(val) > 2000 else cx_Oracle.DB_TYPE_RAW)
                     else:
@@ -181,51 +182,65 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     return successful_rows, num_errors
 
 
-def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None):
+def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None, hint_index_column=None, index_scan_gap_minutes=0):
     """
     데이터를 마이그레이션하고 처리 결과(처리 건수, 오류 건수, 최종 동기화 시간)를 담은 딕셔너리를 반환합니다.
+    hint_index_column이 제공되면 해당 컬럼을 사용하여 조회 범위를 좁힙니다.
     """
     logging.debug(f"[{table_name}] 기간: {start_date} ~ {end_date}")
 
     total_rows_processed = 0
     total_errors = 0
-    max_ts = start_date  # 현재까지 발견된 가장 최신 타임스탬프...
-    
+    max_ts = start_date  # 현재까지 발견된 값 중 최신 타임스탬프
+
     try:
         with source_conn.cursor() as source_cursor:
             # LOB 핸들러 등록 (ORA-64219 방지)
             if cx_Oracle:
                 source_cursor.outputtypehandler = OutputTypeHandler
-                
-            query = f"SELECT * FROM {table_name} WHERE {date_column_name} >= :start_date AND {date_column_name} < :end_date"
-            
-            source_cursor.execute(query, {'start_date': start_date, 'end_date': end_date})
-            
+
+            # 기본 쿼리 조건
+            where_clause = f"{date_column_name} >= :start_date AND {date_column_name} < :end_date"
+            query_params = {'start_date': start_date, 'end_date': end_date}
+
+            # 인덱스 힌트 컬럼 사용 시 조건 추가 (성능 최적화)
+            if hint_index_column:
+                from datetime import timedelta
+                # 안전 여유 시간(Gap)을 뺀 인덱스 조회 시작 시간 계산
+                index_start_date = start_date - timedelta(minutes=index_scan_gap_minutes)
+                where_clause += f" AND {hint_index_column} >= :index_start_date"
+                query_params['index_start_date'] = index_start_date
+                logging.info(f"[{table_name}] 인덱스 최적화 적용: {hint_index_column} >= {index_start_date} (Gap: {index_scan_gap_minutes}분)")
+
+            query = f"SELECT * FROM {table_name} WHERE {where_clause}"
+
+            source_cursor.execute(query, query_params)
+
             columns = [desc[0] for desc in source_cursor.description]
             date_column_index = columns.index(date_column_name)
-            
+
             while True:
                 rows = source_cursor.fetchmany(fetchsize)
                 if not rows:
                     break
-                
+
                 # 현재 청크의 최신 타임스탬프 찾기
                 current_chunk_max_ts = max(row[date_column_index] for row in rows)
 
                 chunk_size = len(rows)
                 logging.info(f"[{table_name}] {chunk_size}건 데이터 추출. 타겟에 적재합니다.")
-                
-                successful_rows_in_chunk, errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)
+
+                successful_rows_in_chunk, errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)      
                 total_errors += errors_in_chunk
                 total_rows_processed += successful_rows_in_chunk
 
                 # 오류가 있어도 무한 루프 방지를 위해 max_ts를 업데이트합니다.
                 if current_chunk_max_ts > max_ts:
                     max_ts = current_chunk_max_ts
-                    
+
                     if errors_in_chunk > 0:
                         logging.warning(f"[{table_name}] 이번 청크에서 {errors_in_chunk}건의 오류가 발생했으나, 무한 루프 방지를 위해 동기화 시간을 업데이트합니다. (New Sync Time: {max_ts})")
-                    
+
                     if update_callback:
                         try:
                             update_callback(max_ts)
@@ -236,7 +251,7 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 logging.info(f"[{table_name}] 기간 내 변경된 데이터가 없습니다.")
             else:
                 logging.info(f"[{table_name}] 총 {total_rows_processed}건 처리 완료 (성공: {total_rows_processed - total_errors}, 실패: {total_errors}).")
-            
+
             return {"processed": total_rows_processed, "errors": total_errors, "max_ts": max_ts}
 
     except cx_Oracle.Error as e:
@@ -247,4 +262,5 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
         logging.error(f"[{table_name}] 알 수 없는 오류 발생: {e}")
         target_conn.rollback()
         raise
+
 

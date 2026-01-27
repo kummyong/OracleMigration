@@ -2,6 +2,8 @@
     {
         "table_name": "SALES",
         "primary_keys": ["ID"],
-        "date_column": "SALE_TIMESTAMP"
+        "date_column": "SALE_TIMESTAMP",
+        "hint_index_column": "REG_DT",
+        "index_scan_gap_minutes": 720
     }
 ]
