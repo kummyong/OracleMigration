@@ -50,7 +50,8 @@ def get_session_pool(config, min_conn=1, max_conn=10):
             increment=1,
             encoding="UTF-8",
             threaded=True,
-            getmode=cx_Oracle.SPOOL_ATTRVAL_WAIT,
+            getmode=cx_Oracle.SPOOL_ATTRVAL_TIMEDWAIT,
+            wait_timeout=5000,
             ping_interval=60
         )
         logging.info(f"Oracle 세션 풀이 생성되었습니다. (DSN: {config['dsn']}, Max: {max_conn})")

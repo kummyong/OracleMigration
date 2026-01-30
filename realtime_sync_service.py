@@ -294,8 +294,10 @@ def main_service_loop():
     source_pool = None
     target_pool = None
     try:
-        source_pool = get_session_pool(SOURCE_DB_CONFIG, min_conn=2, max_conn=MAX_WORKERS)
-        target_pool = get_session_pool(TARGET_DB_CONFIG, min_conn=2, max_conn=MAX_WORKERS)
+        # 교착 상태(Deadlock) 방지를 위해 세션 풀 크기를 워커 수보다 넉넉하게 설정 (+3)
+        pool_size = MAX_WORKERS + 3
+        source_pool = get_session_pool(SOURCE_DB_CONFIG, min_conn=2, max_conn=pool_size)
+        target_pool = get_session_pool(TARGET_DB_CONFIG, min_conn=2, max_conn=pool_size)
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='SyncWorker') as executor:
             while True:

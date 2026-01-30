@@ -1,5 +1,6 @@
 # dashboard_generator.py
 import logging
+import os
 from datetime import datetime
 
 HTML_TEMPLATE = """
@@ -145,7 +146,6 @@ def generate_html_dashboard(status_data, interval, output_path):
             f.write(html_content)
         
         # Windows에서는 rename시 대상 파일이 있으면 에러가 날 수 있으므로 replace 사용
-        import os
         if os.path.exists(output_path):
             os.replace(temp_output_path, output_path)
         else:
@@ -156,7 +156,6 @@ def generate_html_dashboard(status_data, interval, output_path):
         logging.error(f"대시보드 파일 작성 실패: {e}")
         # Clean up temp file if exists
         try:
-            import os
             if os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
         except: pass
