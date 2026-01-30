@@ -263,10 +263,13 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
         duration = time.monotonic() - start_op_time
         with cycle_status_lock:
             cycle_status["tables"][table_name]["duration"] = duration
-            # 대시보드는 각 테이블 작업이 끝날 때마다 항상 업데이트
-            logging.debug(f"[{table_name}] 작업 완료. 대시보드 업데이트 중...")
-            generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
-            logging.debug(f"[{table_name}] 대시보드 업데이트 완료.")
+            # 대시보드 생성을 위해 데이터 복사 (Lock 시간 최소화)
+            status_snapshot = cycle_status.copy()
+        
+        # 대시보드 생성은 Lock 밖에서 수행
+        logging.debug(f"[{table_name}] 작업 완료. 대시보드 업데이트 중...")
+        generate_html_dashboard(status_snapshot, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+        logging.debug(f"[{table_name}] 대시보드 업데이트 완료.")
 
 def main_service_loop():
     """메인 서비스 루프. 주기적으로 모든 테이블의 동기화를 트리거하고 대시보드를 생성합니다."""

@@ -255,7 +255,9 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
 
             while True:
                 t1 = time.monotonic()
+                logging.debug(f"[{table_name}] Fetching next chunk (Size: {fetchsize})...")
                 rows = s_cur.fetchmany(fetchsize)
+                logging.debug(f"[{table_name}] Fetched {len(rows)} rows.")
                 t2 = time.monotonic()
                 if not rows: break
                 
