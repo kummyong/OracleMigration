@@ -21,15 +21,26 @@ def get_last_sync_time(table_name, lock=None):
     try:
         times = {}
         def _read_file():
-            if os.path.exists(LAST_SYNC_TIME_FILE): return json.load(f)
+            if os.path.exists(LAST_SYNC_TIME_FILE):
+                with open(LAST_SYNC_TIME_FILE, 'r') as f:
+                    data = json.load(f)
+                    return {k.upper(): v for k, v in data.items()}
             return {}
         if lock:
             with lock: times = _read_file()
         else: times = _read_file()
+        
         # Default to 3 days ago if no history found
         default_start = (datetime.now() - timedelta(days=3)).isoformat()
-        return datetime.fromisoformat(times.get(table_name, default_start))
-    except: return datetime.now() - timedelta(days=3)
+        
+        # Look up using uppercase table name
+        time_str = times.get(table_name.upper())
+        
+        if time_str:
+            return datetime.fromisoformat(time_str)
+        return datetime.fromisoformat(default_start)
+    except Exception as e:
+        return datetime.now() - timedelta(days=3)
 
 def update_last_sync_time(table_name, sync_time, lock):
     with lock:
