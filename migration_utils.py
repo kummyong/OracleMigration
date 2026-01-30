@@ -60,8 +60,12 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     if is_oracle and p_keys:
         # Standard MERGE with Fallback
         try:
-            # Construct MERGE SQL using DUAL with Safe Aliases to prevent ORA-01745
-            # Map column name to safe alias V_0, V_1, ...
+            with connection.cursor() as cursor:
+                # SQL Execution Timeout (60s)
+                if cx_Oracle: cursor.callTimeout = 60000
+                
+                # Construct MERGE SQL using DUAL with Safe Aliases to prevent ORA-01745
+                # Map column name to safe alias V_0, V_1, ...
             col_map = {col: f"V_{i}" for i, col in enumerate(columns)}
             # For case-insensitive lookup
             col_map_upper = {col.upper(): f"V_{i}" for i, col in enumerate(columns)}
