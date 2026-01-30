@@ -6,261 +6,266 @@ except ImportError:
 import logging
 import os
 import json
-from datetime import datetime
-from config import LAST_SYNC_TIME_FILE # 설정 파일에서 동기화 시간 파일 경로 가져오기
+import time
+from datetime import datetime, timedelta
+from config import LAST_SYNC_TIME_FILE
+from database import get_table_columns
 
 def OutputTypeHandler(cursor, name, defaultType, size, precision, scale):
-    """LOB 데이터를 로케이터가 아닌 실제 값으로 변환하여 가져오는 핸들러"""
     if defaultType == cx_Oracle.DB_TYPE_CLOB:
         return cursor.var(cx_Oracle.DB_TYPE_LONG, arraysize=cursor.arraysize)
     if defaultType == cx_Oracle.DB_TYPE_BLOB:
         return cursor.var(cx_Oracle.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
 
 def get_last_sync_time(table_name, lock=None):
-    """테이블별 마지막 동기화 시간을 JSON 파일에서 읽어옵니다."""
     try:
         times = {}
         def _read_file():
-            if os.path.exists(LAST_SYNC_TIME_FILE):
-                with open(LAST_SYNC_TIME_FILE, 'r') as f:
-                    return json.load(f)
+            if os.path.exists(LAST_SYNC_TIME_FILE): return json.load(f)
             return {}
-
         if lock:
-            with lock:
-                times = _read_file()
-        else:
-            times = _read_file()
-
-        if table_name in times:
-            return datetime.fromisoformat(times[table_name])
-        # 파일이나 테이블 항목이 없으면 아주 오래된 시간을 반환하여 전체 동기화를 유도
-        return datetime(1970, 1, 1)
-    except (IOError, json.JSONDecodeError) as e:
-        logging.warning(f"마지막 동기화 시간 로딩 중 오류: {e}. 전체 동기화를 위해 기본 시간을 반환합니다.")
-        return datetime(1970, 1, 1)
+            with lock: times = _read_file()
+        else: times = _read_file()
+        return datetime.fromisoformat(times.get(table_name, "1970-01-01T00:00:00"))
+    except: return datetime(1970, 1, 1)
 
 def update_last_sync_time(table_name, sync_time, lock):
-    """[Thread-safe] 테이블별 동기화 시간을 JSON 파일에 기록합니다."""
     with lock:
-        times = {}
         try:
+            times = {}
             if os.path.exists(LAST_SYNC_TIME_FILE):
-                with open(LAST_SYNC_TIME_FILE, 'r') as f:
-                    times = json.load(f)
-        except (IOError, json.JSONDecodeError):
-            logging.warning(f"{LAST_SYNC_TIME_FILE} 파일을 읽는 중 오류 발생. 새로운 파일을 생성합니다.")
-
-        times[table_name] = sync_time.isoformat()
-
-        try:
-            with open(LAST_SYNC_TIME_FILE, 'w') as f:
-                json.dump(times, f, indent=4)
-        except IOError as e:
-            logging.error(f"동기화 시간 파일({LAST_SYNC_TIME_FILE}) 저장 실패: {e}")
-
+                with open(LAST_SYNC_TIME_FILE, 'r') as f: times = json.load(f)
+            times[table_name] = sync_time.isoformat()
+            with open(LAST_SYNC_TIME_FILE, 'w') as f: json.dump(times, f, indent=4)
+        except Exception as e: logging.error(f"Time save failed: {e}")
 
 def _load_data_merge(connection, table_name, p_keys, columns, rows):
-    """
-    타겟 DB에 데이터를 적재하고, 오류 건수를 반환합니다.
-    p_keys가 제공되면 MERGE (Upsert)를 사용하고, 그렇지 않으면 단순 INSERT를 사용합니다.
-    """
-    if not rows:
-        logging.debug(f"[{table_name}] 적재할 새로운 데이터가 없습니다.")
-        return 0, 0
-
+    if not rows: return 0, 0
     num_errors = 0
-    successful_rows = 0
-    cols_str = ", ".join(columns)
-    bind_vars = ", ".join([f':{i+1}' for i, _ in enumerate(columns)])
-
-    with connection.cursor() as cursor:
-        # 데이터 타입에 따른 입력 사이즈 명시 (ORA-01461 방지 및 배치 성능 최적화)
-        if rows and cx_Oracle:
-            try:
-                input_sizes = []
-                for val in rows[0]:
-                    if isinstance(val, str):
-                        # ORA-01461 해결: 무조건 VARCHAR로 설정하여 Oracle이 알아서 처리하도록 함.
-                        # 기존에 2000자 초과 시 LONG으로 강제하던 로직이 VARCHAR2 컬럼에 대해 ORA-01461을 유발함.
-                        input_sizes.append(cx_Oracle.DB_TYPE_VARCHAR)
-                    elif isinstance(val, bytes):
-                        input_sizes.append(cx_Oracle.DB_TYPE_LONG_RAW if len(val) > 2000 else cx_Oracle.DB_TYPE_RAW)
-                    else:
-                        input_sizes.append(None)
-                cursor.setinputsizes(*input_sizes)
-            except Exception as e:
-                logging.debug(f"[{table_name}] setinputsizes 설정 중 오류 (무시하고 진행): {e}")
-
+    is_oracle = cx_Oracle and hasattr(connection, 'username')
+    
+    if is_oracle and p_keys:
+        # Standard MERGE with Fallback
         try:
-            if not p_keys:
-                # No primary keys, use simple INSERT
-                logging.info(f"[{table_name}] Primary Key가 없어 단순 INSERT로 적재합니다. (중복 데이터가 발생할 수 있음)")
-                insert_sql = f"""
-                INSERT INTO {table_name} ({cols_str})
-                VALUES ({bind_vars})
-                """
-                cursor.executemany(insert_sql, rows, batcherrors=True)
-                errors = cursor.getbatcherrors()
-                
-                real_errors_count = 0
-                for error in errors:
-                    # ORA-00001: Unique constraint violated (중복 무시)
-                    if error.code == 1:
-                        logging.info(f"[{table_name}] 중복 데이터 건너뜀 (ORA-00001) - Offset: {error.offset}")
-                    else:
-                        real_errors_count += 1
-                        problematic_row = rows[error.offset]
-                        logging.error(f"[{table_name}] INSERT Error {error.code}: {error.message.strip()} | Data: {problematic_row}")
-                
-                num_errors = real_errors_count
-                if num_errors > 0:
-                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 INSERT 오류 발생 (중복 제외).")
-                
-                connection.commit()
-                successful_rows = len(rows) - num_errors
-                if successful_rows > 0:
-                    logging.info(f"[{table_name}] {successful_rows}건 데이터 INSERT 완료.")
-            else:
-                # Primary keys are available, use MERGE (Upsert)
-                logging.info(f"[{table_name}] Primary Key가 있어 MERGE (Upsert)로 적재합니다.")
-                on_condition = " AND ".join([f"T.{pk} = S.{pk}" for pk in p_keys])
-                update_cols = [col for col in columns if col not in p_keys]
-
-                if update_cols:
-                    update_set = ", ".join([f"T.{col} = S.{col}" for col in update_cols])
-                    update_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
+            # Construct MERGE SQL using DUAL with Safe Aliases to prevent ORA-01745
+            # Map column name to safe alias V_0, V_1, ...
+            col_map = {col: f"V_{i}" for i, col in enumerate(columns)}
+            # For case-insensitive lookup
+            col_map_upper = {col.upper(): f"V_{i}" for i, col in enumerate(columns)}
+            
+            # Using DUAL with safe aliases
+            # SELECT :1 V_0, :2 V_1 ... FROM DUAL
+            using_vals = ", ".join([f":{i+1} {col_map[col]}" for i, col in enumerate(columns)])
+            
+            # Match p_keys case-insensitively to actual DB columns
+            on_cond_list = []
+            matched_pk_cols_upper = []
+            for pk in p_keys:
+                pk_upper = pk.upper()
+                if pk_upper in col_map_upper:
+                    # Use actual DB column name via simple equality (Index-friendly)
+                    # Find original column name for quoting
+                    actual_col = next(c for c in columns if c.upper() == pk_upper)
+                    on_cond_list.append(f"T.\"{actual_col}\" = S.{col_map_upper[pk_upper]}")
+                    matched_pk_cols_upper.append(pk_upper)
                 else:
-                    logging.info(f"[{table_name}] PK 외 업데이트할 컬럼이 없어 WHEN MATCHED(UPDATE) 절을 생략합니다.")
-                    update_clause = "" # 모든 컬럼이 PK이면 업데이트가 불필요함
+                    logging.warning(f"[{table_name}] Configured PK '{pk}' not found in target columns. Skipping in MERGE condition.")
+            
+            if not on_cond_list:
+                raise ValueError(f"No valid PKs found for MERGE ON clause among: {p_keys}")
 
-                insert_cols = cols_str
-                insert_vals = ", ".join([f"S.{col}" for col in columns])
+            on_cond = " AND ".join(on_cond_list)
+            
+            # Update clause: Update all columns that are NOT part of the PK
+            update_cols = [col for col in columns if col.upper() not in matched_pk_cols_upper]
+            update_clause = ""
+            if update_cols:
+                updates = [f"T.\"{c}\"=S.{col_map[c]}" for c in update_cols]
+                update_clause = f"WHEN MATCHED THEN UPDATE SET {', '.join(updates)}"
+            
+            cols_str = ", ".join([f"\"{c}\"" for c in columns])
+            vals_str = ", ".join([f"S.{col_map[c]}" for c in columns])
+            
+            merge_sql = f"MERGE INTO {table_name} T USING (SELECT {using_vals} FROM DUAL) S ON ({on_cond}) {update_clause} WHEN NOT MATCHED THEN INSERT ({cols_str}) VALUES ({vals_str})"
 
-                merge_sql = f"""
-                MERGE INTO {table_name} T
-                USING (
-                    SELECT {', '.join([f':{i+1} AS {col}' for i, col in enumerate(columns, 1)])} FROM DUAL
-                ) S ON ({on_condition})
-                {update_clause}
-                WHEN NOT MATCHED THEN
-                    INSERT ({insert_cols})
-                    VALUES ({insert_vals})
-                """
-                cursor.executemany(merge_sql, rows, batcherrors=True)
-                errors = cursor.getbatcherrors()
-                
-                real_errors_count = 0
-                for error in errors:
-                    # ORA-00001: Unique constraint violated (MERGE에서도 발생 가능, 무시)
-                    if error.code == 1:
-                        logging.info(f"[{table_name}] 중복 데이터 건너뜀 (ORA-00001, MERGE) - Offset: {error.offset}")
-                    else:
-                        real_errors_count += 1
-                        problematic_row = rows[error.offset]
-                        logging.error(f"[{table_name}] MERGE Error {error.code}: {error.message.strip()} | Data: {problematic_row}")
+            # logging.info(f"[{table_name}] MERGE SQL: {merge_sql}")
 
-                num_errors = real_errors_count
-                
-                if num_errors > 0:
-                    logging.warning(f"[{table_name}] {num_errors}건의 데이터에서 MERGE 오류 발생 (중복 제외).")
+            with connection.cursor() as cursor:
+                try:
+                    # 밀리초 보존을 위해 datetime 객체는 TIMESTAMP 타입으로 명시적 바인딩
+                    input_sizes = []
+                    for val in rows[0]:
+                        if isinstance(val, datetime):
+                            input_sizes.append(cx_Oracle.TIMESTAMP)
+                        elif isinstance(val, str) and len(val) > 4000: # CLOB 처리
+                            input_sizes.append(cx_Oracle.CLOB)
+                        else:
+                            input_sizes.append(None)
+                    cursor.setinputsizes(*input_sizes)
+                except: pass
 
+                try:
+                    # 1. Try Batch Execution
+                    cursor.executemany(merge_sql, rows)
+                except cx_Oracle.Error:
+                    # 2. Fallback to Single Row Execution on Error
+                    connection.rollback()
+                    for row in rows:
+                        try:
+                            cursor.execute(merge_sql, row)
+                        except Exception as e:
+                            num_errors += 1
+                            logging.error(f"[{table_name}] Merge Error: {e} | Row: {row}")
+            
+            if num_errors < len(rows):
                 connection.commit()
-                successful_rows = len(rows) - num_errors
-                if successful_rows > 0:
-                    logging.info(f"[{table_name}] {successful_rows}건 데이터 MERGE 완료.")
+            return len(rows) - num_errors, num_errors
 
-        except cx_Oracle.Error as e:
-            logging.error(f"[{table_name}] DB 작업 중 심각한 오류 발생: {e}")
+        except Exception as e:
+            logging.error(f"[{table_name}] Fatal Merge Error: {e}", exc_info=True)
+            # logging.error(f"[{table_name}] Failed SQL: {merge_sql}")
             connection.rollback()
             raise
+
+    elif is_oracle:
+        # Oracle Insert (No PK)
+        binds = ", ".join([f":{i+1}" for i in range(len(columns))])
+        quoted_cols = ", ".join([f"\"{c}\"" for c in columns])
+        sql = f"INSERT INTO {table_name} ({quoted_cols}) VALUES ({binds})"
+        try:
+            with connection.cursor() as cursor:
+                try:
+                    input_sizes = []
+                    for val in rows[0]:
+                        if isinstance(val, datetime):
+                            input_sizes.append(cx_Oracle.TIMESTAMP)
+                        elif isinstance(val, str) and len(val) > 4000:
+                            input_sizes.append(cx_Oracle.CLOB)
+                        else:
+                            input_sizes.append(None)
+                    cursor.setinputsizes(*input_sizes)
+                except: pass
+
+                try:
+                    cursor.executemany(sql, rows, batcherrors=True) # 성능을 위해 적용
+                    for error in cursor.getbatcherrors():
+                        num_errors += 1
+                        logging.warning(f"[{table_name}] Batch Insert Error (Row {error.offset}): {error.message}")
+                except cx_Oracle.Error as e:
+                    logging.warning(f"[{table_name}] Batch Insert Failed (Fallback to row-by-row): {e}")
+                    connection.rollback()
+                    for row in rows:
+                        try: cursor.execute(sql, row)
+                        except Exception as e:
+                            num_errors += 1 # Likely ORA-00001
+            
+            if num_errors < len(rows):
+                connection.commit()
+            return len(rows) - num_errors, 0
         except Exception as e:
-            logging.error(f"[{table_name}] 알 수 없는 오류 발생: {e}")
+            logging.error(f"[{table_name}] Fatal Insert Error: {e}", exc_info=True)
             connection.rollback()
             raise
     
-    return successful_rows, num_errors
-
+    else:
+        # Non-Oracle Logic (SQLite)
+        binds = ", ".join(['?' for _ in columns])
+        if p_keys:
+            pk_c = ", ".join(p_keys)
+            up_s = ", ".join([f"{c}=excluded.{c}" for c in columns if c not in p_keys])
+            sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({binds}) ON CONFLICT({pk_c}) DO UPDATE SET {up_s}" if up_s else f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({binds}) ON CONFLICT({pk_c}) DO NOTHING"
+        else:
+            sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({binds})"
+        
+        try:
+            cursor = connection.cursor()
+            cursor.executemany(sql, rows)
+            cursor.close()
+            connection.commit()
+            return len(rows), 0
+        except Exception as e:
+            logging.error(f"[{table_name}] Fatal Load Error: {e}", exc_info=True)
+            connection.rollback()
+            return 0, len(rows)
 
 def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None, hint_index_column=None, index_scan_gap_minutes=0):
-    """
-    데이터를 마이그레이션하고 처리 결과(처리 건수, 오류 건수, 최종 동기화 시간)를 담은 딕셔너리를 반환합니다.
-    hint_index_column이 제공되면 해당 컬럼을 사용하여 조회 범위를 좁힙니다.
-    """
     logging.debug(f"[{table_name}] 기간: {start_date} ~ {end_date}")
-
-    total_rows_processed = 0
-    total_errors = 0
-    max_ts = start_date  # 현재까지 발견된 값 중 최신 타임스탬프
+    logging.info(f"[{table_name}] Migration start. Fetching target columns...")
+    total_rows = 0
+    total_err = 0
+    max_ts = start_date
 
     try:
-        with source_conn.cursor() as source_cursor:
-            # LOB 핸들러 등록 (ORA-64219 방지)
-            if cx_Oracle:
-                source_cursor.outputtypehandler = OutputTypeHandler
+        # Schema Matching & Optimization
+        target_cols = get_table_columns(target_conn, table_name)
+        if target_cols:
+            logging.info(f"[{table_name}] Target Schema: {target_cols}")
+            
+        if not target_cols:
+            sel_clause = "*"
+        else:
+            sel_clause = ", ".join([f"\"{c[0]}\"" for c in target_cols])
 
-            # 기본 쿼리 조건
-            where_clause = f"{date_column_name} >= :start_date AND {date_column_name} < :end_date"
-            query_params = {'start_date': start_date, 'end_date': end_date}
+        with source_conn.cursor() as s_cur:
+            if cx_Oracle and hasattr(source_conn, 'username'):
+                s_cur.outputtypehandler = OutputTypeHandler
 
-            # 인덱스 힌트 컬럼 사용 시 조건 추가 (성능 최적화)
+            # ORA-01745 fix: Positional binding
+            where = f"\"{date_column_name}\" >= :1 AND \"{date_column_name}\" < :2"
+            params = [start_date, end_date]
+
             if hint_index_column:
-                from datetime import timedelta
-                # 안전 여유 시간(Gap)을 뺀 인덱스 조회 시작 시간 계산
-                index_start_date = start_date - timedelta(minutes=index_scan_gap_minutes)
-                where_clause += f" AND {hint_index_column} >= :index_start_date"
-                query_params['index_start_date'] = index_start_date
-                logging.info(f"[{table_name}] 인덱스 최적화 적용: {hint_index_column} >= {index_start_date} (Gap: {index_scan_gap_minutes}분)")
+                idx_start = start_date - timedelta(minutes=index_scan_gap_minutes)
+                where += f" AND \"{hint_index_column}\" >= :3"
+                params.append(idx_start)
+            
+            # Quote table name
+            query = f"SELECT {sel_clause} FROM \"{table_name}\" WHERE {where} ORDER BY \"{date_column_name}\""
+            
+            if "." in table_name:
+                parts = table_name.split(".")
+                quoted_table = ".".join([f"\"{p}\"" for p in parts])
+                query = query.replace(f"\"{table_name}\"", quoted_table)
 
-            query = f"SELECT * FROM {table_name} WHERE {where_clause}"
-
-            source_cursor.execute(query, query_params)
-
-            columns = [desc[0] for desc in source_cursor.description]
-            date_column_index = columns.index(date_column_name)
+            s_cur.arraysize = fetchsize
+            
+            logging.info(f"[{table_name}] Source Query: {query}")
+            logging.info(f"[{table_name}] Source Params: {params}")
+            
+            s_cur.execute(query, params)
+            
+            cols = [d[0] for d in s_cur.description]
+            try: date_idx = cols.index(date_column_name)
+            except: 
+                col_map = {c.upper(): i for i, c in enumerate(cols)}
+                date_idx = col_map[date_column_name.upper()]
 
             while True:
-                rows = source_cursor.fetchmany(fetchsize)
-                if not rows:
-                    break
+                t1 = time.monotonic()
+                rows = s_cur.fetchmany(fetchsize)
+                t2 = time.monotonic()
+                if not rows: break
+                
+                cur_max = max(r[date_idx] for r in rows)
+                
+                t3 = time.monotonic()
+                # Restore original signature (no target_col_defs)
+                suc, err = _load_data_merge(target_conn, table_name, p_keys, cols, rows)
+                t4 = time.monotonic()
+                
+                total_rows += suc
+                total_err += err
+                
+                logging.info(f"[{table_name}] {len(rows)}건 (Get:{t2-t1:.2f}s Put:{t4-t3:.2f}s) -> 성공:{suc} 실패:{err}")
+                
+                if err > 0: break
+                if cur_max > max_ts:
+                    max_ts = cur_max
+                    if update_callback: update_callback(max_ts)
+                    
+        return {"processed": total_rows, "errors": total_err, "max_ts": max_ts}
 
-                # 현재 청크의 최신 타임스탬프 찾기
-                current_chunk_max_ts = max(row[date_column_index] for row in rows)
-
-                chunk_size = len(rows)
-                logging.info(f"[{table_name}] {chunk_size}건 데이터 추출. 타겟에 적재합니다.")
-
-                successful_rows_in_chunk, errors_in_chunk = _load_data_merge(target_conn, table_name, p_keys, columns, rows)      
-                total_errors += errors_in_chunk
-                total_rows_processed += successful_rows_in_chunk
-
-                # 오류가 있어도 무한 루프 방지를 위해 max_ts를 업데이트합니다.
-                if current_chunk_max_ts > max_ts:
-                    max_ts = current_chunk_max_ts
-
-                    if errors_in_chunk > 0:
-                        logging.warning(f"[{table_name}] 이번 청크에서 {errors_in_chunk}건의 오류가 발생했으나, 무한 루프 방지를 위해 동기화 시간을 업데이트합니다. (New Sync Time: {max_ts})")
-
-                    if update_callback:
-                        try:
-                            update_callback(max_ts)
-                        except Exception as e:
-                            logging.error(f"[{table_name}] 동기화 시간 업데이트 콜백 실패: {e}")
-
-            if total_rows_processed == 0:
-                logging.info(f"[{table_name}] 기간 내 변경된 데이터가 없습니다.")
-            else:
-                logging.info(f"[{table_name}] 총 {total_rows_processed}건 처리 완료 (성공: {total_rows_processed - total_errors}, 실패: {total_errors}).")
-
-            return {"processed": total_rows_processed, "errors": total_errors, "max_ts": max_ts}
-
-    except cx_Oracle.Error as e:
-        logging.error(f"[{table_name}] 마이그레이션 중 DB 오류 발생: {e}")
-        target_conn.rollback()
-        raise
     except Exception as e:
-        logging.error(f"[{table_name}] 알 수 없는 오류 발생: {e}")
+        logging.error(f"[{table_name}] Migration Failed: {e}", exc_info=True)
         target_conn.rollback()
         raise
-
-

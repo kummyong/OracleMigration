@@ -115,3 +115,69 @@ def get_upsert_keys(connection, table_name):
             logging.warning(f"[{table_name}] 테이블에서 Primary Key 또는 Unique Key를 찾을 수 없습니다. (MERGE 불가)")
         return keys
 
+def get_table_columns(connection, table_name):
+    """
+    지정된 테이블의 컬럼 이름과 타입을 조회합니다.
+    Oracle: all_tab_cols 사용
+    SQLite: PRAGMA table_info 사용
+    반환값: [(col_name, data_type, data_length), ...]
+    """
+    table_name_upper = table_name.upper()
+
+    # Oracle DB인지 확인 (cx_Oracle이 있고 username 속성이 있는 경우)
+    if cx_Oracle and hasattr(connection, 'username'):
+        owner = connection.username
+        if owner:
+            owner = owner.upper()
+        else:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT USER FROM DUAL")
+                    row = cursor.fetchone()
+                    if row:
+                        owner = row[0]
+            except Exception as e:
+                logging.warning(f"Oracle owner 조회 실패: {e}")
+
+        if owner:
+            query = """
+            SELECT column_name, data_type, data_length
+            FROM all_tab_columns
+            WHERE owner = :owner AND table_name = :table_name
+            ORDER BY column_id
+            """
+            with connection.cursor() as cursor:
+                cursor.execute(query, {'owner': owner, 'table_name': table_name_upper})
+                return cursor.fetchall()
+        else:
+            logging.warning(f"[{table_name}] Oracle owner 정보를 가져올 수 없어 컬럼 조회를 건너뜁니다.")
+            return []
+            
+    else:
+        # SQLite DB 로직
+        query = f"PRAGMA table_info({table_name})"
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+                cols = []
+                for row in cursor.fetchall():
+                    col_name = row[1]
+                    col_type = row[2]
+                    # SQLite는 타입에 길이가 포함될 수도 있고 아닐 수도 있음 (예: VARCHAR(100) vs TEXT)
+                    length = 4000 # 기본값
+                    if '(' in col_type:
+                        try:
+                            length_str = col_type.split('(')[1].split(')')[0]
+                            # 쉼표가 있는 경우 (예: DECIMAL(10,5)) 앞부분만 사용
+                            if ',' in length_str:
+                                length = int(length_str.split(',')[0])
+                            else:
+                                length = int(length_str)
+                        except:
+                            pass
+                    cols.append((col_name, col_type, length))
+                return cols
+        except Exception as e:
+             logging.error(f"SQLite 컬럼 조회 실패: {e}")
+             return []
