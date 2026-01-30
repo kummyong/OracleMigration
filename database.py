@@ -1,58 +1,42 @@
 try:
     import oracledb
+    import sys
+    # cx_Oracle 호환 모드 활성화 (cx_Oracle이 설치되지 않아도 동작하게 함)
+    oracledb.version = "8.3.0"
+    sys.modules["cx_Oracle"] = oracledb
+    import cx_Oracle # 이제 oracledb가 cx_Oracle인 척 함
 except ImportError:
-    oracledb = None
-import sqlite3
+    cx_Oracle = None
 import logging
 import os
 from datetime import datetime
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, LAST_SYNC_TIME_FILE
 
-# 기본적으로 Thin Mode 사용
-if oracledb:
-    try:
-        # Thin 모드에서는 별도 초기화 불필요.
-        # Thick 모드가 필요한 경우(예: DB 버전이 너무 낮거나 고급 기능 필요 시) init_oracle_client 호출
-        pass 
-    except Exception as e:
-        logging.warning(f"oracledb 초기화 중 경고: {e}")
-
 def get_db_connection(config):
     """지정된 설정으로 데이터베이스 연결을 생성합니다."""
-    # SQLite 처리
-    if 'db_file' in config:
-        conn = sqlite3.connect(config['db_file'])
-        logging.info(f"성공적으로 SQLite DB에 연결되었습니다. (파일: {config['db_file']})")
-        return conn
-
     # Oracle 처리
-    if oracledb is None:
-        raise ImportError("oracledb 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
+    if cx_Oracle is None:
+        raise ImportError("cx_Oracle(oracledb) 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
         
     try:
-        # Thin Mode 연결 (기본값)
-        conn = oracledb.connect(
+        conn = cx_Oracle.connect(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn']
         )
         logging.info(f"성공적으로 Oracle DB에 연결되었습니다. (DSN: {config['dsn']})")
         return conn
-    except oracledb.Error as e:
+    except cx_Oracle.Error as e:
         logging.error(f"Oracle DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
         raise
 
 def get_session_pool(config, min_conn=1, max_conn=10):
-    """지정된 설정으로 Oracle 세션 풀을 생성합니다. SQLite의 경우 None을 반환합니다."""
-    if 'db_file' in config:
-        return None
-
-    if oracledb is None:
-        raise ImportError("oracledb 패키지가 없어 세션 풀을 생성할 수 없습니다.")
+    """지정된 설정으로 Oracle 세션 풀을 생성합니다."""
+    if cx_Oracle is None:
+        raise ImportError("cx_Oracle(oracledb) 패키지가 없어 세션 풀을 생성할 수 없습니다.")
 
     try:
-        # oracledb 에서는 create_pool 사용
-        pool = oracledb.create_pool(
+        pool = cx_Oracle.SessionPool(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn'],
@@ -60,14 +44,13 @@ def get_session_pool(config, min_conn=1, max_conn=10):
             max=max_conn,
             increment=1,
             encoding="UTF-8",
-            getmode=oracledb.POOL_GET_WAIT, # 기본 WAIT
-            # wait_timeout=5000, # oracledb 에서는 timeout 인자가 다를 수 있음 -> create_pool에는 wait_timeout 직접 인자가 없음.
-            # get() 할 때 timeout을 줄 수 있거나, 기본 타임아웃 사용.
+            threaded=True,
+            getmode=cx_Oracle.SPOOL_ATTRVAL_WAIT,
             ping_interval=60
         )
         logging.info(f"Oracle 세션 풀이 생성되었습니다. (DSN: {config['dsn']}, Max: {max_conn})")
         return pool
-    except oracledb.Error as e:
+    except cx_Oracle.Error as e:
         logging.error(f"세션 풀 생성 중 오류 발생: {e}")
         raise
 
@@ -94,15 +77,11 @@ def get_upsert_keys(connection, table_name):
       AND cons.table_name = :table_name
     ORDER BY cols.position
     """
-    logging.info(f"[{table_name}] 테이블의 Primary Key를 소스 DB에서 조회합니다...")
     with connection.cursor() as cursor:
         cursor.execute(pk_query, {'owner': owner, 'table_name': table_name_upper})
         keys = [row[0] for row in cursor.fetchall()]
         if keys:
-            logging.info(f"[{table_name}] 자동 조회된 PK: {keys}")
             return keys
-
-    logging.warning(f"[{table_name}] Primary Key가 없어 Unique Key를 조회합니다...")
 
     # 2순위: Unique Key 조회
     uk_query = """
@@ -135,65 +114,26 @@ def get_table_columns(connection, table_name):
     """
     지정된 테이블의 컬럼 이름과 타입을 조회합니다.
     Oracle: all_tab_cols 사용
-    SQLite: PRAGMA table_info 사용
     반환값: [(col_name, data_type, data_length), ...]
     """
     table_name_upper = table_name.upper()
 
-    # Oracle DB인지 확인 (oracledb가 있고 username 속성이 있는 경우)
-    if oracledb and hasattr(connection, 'username'):
-        owner = connection.username
-        if owner:
-            owner = owner.upper()
-        else:
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT USER FROM DUAL")
-                    row = cursor.fetchone()
-                    if row:
-                        owner = row[0]
-            except Exception as e:
-                logging.warning(f"Oracle owner 조회 실패: {e}")
-
-        if owner:
-            query = """
-            SELECT column_name, data_type, data_length
-            FROM all_tab_columns
-            WHERE owner = :owner AND table_name = :table_name
-            ORDER BY column_id
-            """
+    # Oracle DB인지 확인
+    if hasattr(connection, 'username'):
+        owner = connection.username.upper()
+        
+        query = """
+        SELECT column_name, data_type, data_length
+        FROM all_tab_columns
+        WHERE owner = :owner AND table_name = :table_name
+        ORDER BY column_id
+        """
+        try:
             with connection.cursor() as cursor:
                 cursor.execute(query, {'owner': owner, 'table_name': table_name_upper})
                 return cursor.fetchall()
-        else:
-            logging.warning(f"[{table_name}] Oracle owner 정보를 가져올 수 없어 컬럼 조회를 건너뜁니다.")
-            return []
-            
-    else:
-        # SQLite DB 로직
-        query = f"PRAGMA table_info({table_name})"
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(query)
-                # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-                cols = []
-                for row in cursor.fetchall():
-                    col_name = row[1]
-                    col_type = row[2]
-                    # SQLite는 타입에 길이가 포함될 수도 있고 아닐 수도 있음 (예: VARCHAR(100) vs TEXT)
-                    length = 4000 # 기본값
-                    if '(' in col_type:
-                        try:
-                            length_str = col_type.split('(')[1].split(')')[0]
-                            # 쉼표가 있는 경우 (예: DECIMAL(10,5)) 앞부분만 사용
-                            if ',' in length_str:
-                                length = int(length_str.split(',')[0])
-                            else:
-                                length = int(length_str)
-                        except:
-                            pass
-                    cols.append((col_name, col_type, length))
-                return cols
         except Exception as e:
-             logging.error(f"SQLite 컬럼 조회 실패: {e}")
-             return []
+            logging.warning(f"[{table_name}] 컬럼 조회 실패: {e}")
+            return []
+    
+    return []
