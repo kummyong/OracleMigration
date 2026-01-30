@@ -1,1 +1,1 @@
-cx_Oracle
+oracledb

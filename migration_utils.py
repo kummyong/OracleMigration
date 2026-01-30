@@ -1,8 +1,8 @@
 # migration_utils.py
 try:
-    import cx_Oracle
+    import oracledb
 except ImportError:
-    cx_Oracle = None
+    oracledb = None
 import logging
 import os
 import json
@@ -12,10 +12,10 @@ from config import LAST_SYNC_TIME_FILE
 from database import get_table_columns
 
 def OutputTypeHandler(cursor, name, defaultType, size, precision, scale):
-    if defaultType == cx_Oracle.DB_TYPE_CLOB:
-        return cursor.var(cx_Oracle.DB_TYPE_LONG, arraysize=cursor.arraysize)
-    if defaultType == cx_Oracle.DB_TYPE_BLOB:
-        return cursor.var(cx_Oracle.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
+    if defaultType == oracledb.DB_TYPE_CLOB:
+        return cursor.var(oracledb.DB_TYPE_LONG, arraysize=cursor.arraysize)
+    if defaultType == oracledb.DB_TYPE_BLOB:
+        return cursor.var(oracledb.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
 
 def get_last_sync_time(table_name, lock=None):
     try:
@@ -55,14 +55,14 @@ def update_last_sync_time(table_name, sync_time, lock):
 def _load_data_merge(connection, table_name, p_keys, columns, rows):
     if not rows: return 0, 0
     num_errors = 0
-    is_oracle = cx_Oracle and hasattr(connection, 'username')
+    is_oracle = oracledb and hasattr(connection, 'username')
     
     if is_oracle and p_keys:
         # Standard MERGE with Fallback
         try:
             with connection.cursor() as cursor:
                 # SQL Execution Timeout (60s)
-                if cx_Oracle: 
+                if oracledb: 
                     try:
                         cursor.connection.callTimeout = 60000
                     except AttributeError:
@@ -120,9 +120,9 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                     input_sizes = []
                     for val in rows[0]:
                         if isinstance(val, datetime):
-                            input_sizes.append(cx_Oracle.TIMESTAMP)
+                            input_sizes.append(oracledb.TIMESTAMP)
                         elif isinstance(val, str) and len(val) > 4000: # CLOB 처리
-                            input_sizes.append(cx_Oracle.CLOB)
+                            input_sizes.append(oracledb.CLOB)
                         else:
                             input_sizes.append(None)
                     cursor.setinputsizes(*input_sizes)
@@ -131,7 +131,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 try:
                     # 1. Try Batch Execution
                     cursor.executemany(merge_sql, rows)
-                except cx_Oracle.Error:
+                except oracledb.Error:
                     # 2. Fallback to Single Row Execution on Error
                     connection.rollback()
                     for row in rows:
@@ -162,9 +162,9 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                     input_sizes = []
                     for val in rows[0]:
                         if isinstance(val, datetime):
-                            input_sizes.append(cx_Oracle.TIMESTAMP)
+                            input_sizes.append(oracledb.TIMESTAMP)
                         elif isinstance(val, str) and len(val) > 4000:
-                            input_sizes.append(cx_Oracle.CLOB)
+                            input_sizes.append(oracledb.CLOB)
                         else:
                             input_sizes.append(None)
                     cursor.setinputsizes(*input_sizes)
@@ -175,7 +175,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                     for error in cursor.getbatcherrors():
                         num_errors += 1
                         logging.warning(f"[{table_name}] Batch Insert Error (Row {error.offset}): {error.message}")
-                except cx_Oracle.Error as e:
+                except oracledb.Error as e:
                     logging.warning(f"[{table_name}] Batch Insert Failed (Fallback to row-by-row): {e}")
                     connection.rollback()
                     for row in rows:
@@ -231,7 +231,7 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             sel_clause = ", ".join([f"\"{c[0]}\"" for c in target_cols])
 
         with source_conn.cursor() as s_cur:
-            if cx_Oracle and hasattr(source_conn, 'username'):
+            if oracledb and hasattr(source_conn, 'username'):
                 s_cur.outputtypehandler = OutputTypeHandler
 
             # ORA-01745 fix: Positional binding
@@ -254,16 +254,16 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             s_cur.arraysize = fetchsize
             
             # 쿼리 실행 타임아웃 설정 (60초) - 무한 대기 방지
-            if cx_Oracle:
+            if oracledb:
                 try:
-                    # cx_Oracle 8.2+ 지원
+                    # oracledb 8.2+ 지원
                     s_cur.connection.callTimeout = 60000
                 except AttributeError:
                     try:
                          # Older versions might support execution options or just ignore
                          s_cur.callTimeout = 60000
                     except AttributeError:
-                        logging.warning(f"[{table_name}] cx_Oracle 버전이 낮아 Query Timeout 설정을 실패했습니다.")
+                        logging.warning(f"[{table_name}] oracledb 버전이 낮아 Query Timeout 설정을 실패했습니다.")
             
             logging.info(f"[{table_name}] Source Query: {query}")
             logging.info(f"[{table_name}] Source Params: {params}")

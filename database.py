@@ -1,12 +1,21 @@
 try:
-    import cx_Oracle
+    import oracledb
 except ImportError:
-    cx_Oracle = None
+    oracledb = None
 import sqlite3
 import logging
 import os
 from datetime import datetime
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, LAST_SYNC_TIME_FILE
+
+# 기본적으로 Thin Mode 사용
+if oracledb:
+    try:
+        # Thin 모드에서는 별도 초기화 불필요.
+        # Thick 모드가 필요한 경우(예: DB 버전이 너무 낮거나 고급 기능 필요 시) init_oracle_client 호출
+        pass 
+    except Exception as e:
+        logging.warning(f"oracledb 초기화 중 경고: {e}")
 
 def get_db_connection(config):
     """지정된 설정으로 데이터베이스 연결을 생성합니다."""
@@ -17,18 +26,19 @@ def get_db_connection(config):
         return conn
 
     # Oracle 처리
-    if cx_Oracle is None:
-        raise ImportError("cx_Oracle 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
+    if oracledb is None:
+        raise ImportError("oracledb 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
         
     try:
-        conn = cx_Oracle.connect(
+        # Thin Mode 연결 (기본값)
+        conn = oracledb.connect(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn']
         )
         logging.info(f"성공적으로 Oracle DB에 연결되었습니다. (DSN: {config['dsn']})")
         return conn
-    except cx_Oracle.Error as e:
+    except oracledb.Error as e:
         logging.error(f"Oracle DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
         raise
 
@@ -37,11 +47,12 @@ def get_session_pool(config, min_conn=1, max_conn=10):
     if 'db_file' in config:
         return None
 
-    if cx_Oracle is None:
-        raise ImportError("cx_Oracle 패키지가 없어 세션 풀을 생성할 수 없습니다.")
+    if oracledb is None:
+        raise ImportError("oracledb 패키지가 없어 세션 풀을 생성할 수 없습니다.")
 
     try:
-        pool = cx_Oracle.SessionPool(
+        # oracledb 에서는 create_pool 사용
+        pool = oracledb.create_pool(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn'],
@@ -49,14 +60,14 @@ def get_session_pool(config, min_conn=1, max_conn=10):
             max=max_conn,
             increment=1,
             encoding="UTF-8",
-            threaded=True,
-            getmode=cx_Oracle.SPOOL_ATTRVAL_TIMEDWAIT,
-            wait_timeout=5000,
+            getmode=oracledb.POOL_GET_WAIT, # 기본 WAIT
+            # wait_timeout=5000, # oracledb 에서는 timeout 인자가 다를 수 있음 -> create_pool에는 wait_timeout 직접 인자가 없음.
+            # get() 할 때 timeout을 줄 수 있거나, 기본 타임아웃 사용.
             ping_interval=60
         )
         logging.info(f"Oracle 세션 풀이 생성되었습니다. (DSN: {config['dsn']}, Max: {max_conn})")
         return pool
-    except cx_Oracle.Error as e:
+    except oracledb.Error as e:
         logging.error(f"세션 풀 생성 중 오류 발생: {e}")
         raise
 
@@ -66,7 +77,11 @@ def get_upsert_keys(connection, table_name):
     1순위: Primary Key
     2순위: 첫 번째 Unique Key
     """
-    owner = connection.username.upper()
+    if hasattr(connection, 'username'):
+        owner = connection.username.upper()
+    else:
+        return []
+
     table_name_upper = table_name.upper()
 
     # 1순위: Primary Key 조회
@@ -125,8 +140,8 @@ def get_table_columns(connection, table_name):
     """
     table_name_upper = table_name.upper()
 
-    # Oracle DB인지 확인 (cx_Oracle이 있고 username 속성이 있는 경우)
-    if cx_Oracle and hasattr(connection, 'username'):
+    # Oracle DB인지 확인 (oracledb가 있고 username 속성이 있는 경우)
+    if oracledb and hasattr(connection, 'username'):
         owner = connection.username
         if owner:
             owner = owner.upper()

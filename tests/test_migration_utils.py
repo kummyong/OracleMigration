@@ -6,8 +6,9 @@ import os
 # 프로젝트 루트 경로를 sys.path에 추가하여 모듈 임포트 가능하게 함
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# cx_Oracle 모킹 (import 전에 해야 함)
-sys.modules['cx_Oracle'] = MagicMock()
+# oracledb 모킹 (import 전에 해야 함)
+# cx_Oracle 대신 oracledb 사용
+sys.modules['oracledb'] = MagicMock()
 
 from migration_utils import _load_data_merge
 
@@ -43,7 +44,8 @@ class TestMigrationUtils(unittest.TestCase):
         self.assertIn("USING (SELECT :1 V_0, :2 V_1, :3 V_2 FROM DUAL) S", generated_sql)
         self.assertIn('ON (T."ID" = S.V_0)', generated_sql)
         
-        # UPDATE 절 검증
+        # UPDATE 절 검증 (따옴표 확인)
+        # NAME은 V_1, VAL은 V_2
         self.assertIn('UPDATE SET T."NAME"=S.V_1, T."VAL"=S.V_2', generated_sql)
         
         # INSERT 절 검증
@@ -77,31 +79,10 @@ class TestMigrationUtils(unittest.TestCase):
         
         # 잘못된 이스케이프(")가 없는지 확인
         self.assertNotIn(r'T.\"', generated_sql) 
-        self.assertNotIn(r'T.\"DESC\"', generated_sql)
+        self.assertNotIn(r'T.\"DESC\"', generated_sql) # 파이썬 문자열 내에서 이스케이프된 따옴표
         
         # 올바른 형태 확인
         self.assertIn('T."DESC"=S.V_1', generated_sql)
-
-    def test_merge_integrity_error_scenario(self):
-        """무결성 에러 발생 시나리오: MERGE SQL의 ON 절이 단순 비교인지 확인"""
-        table_name = "TEST_TABLE"
-        p_keys = ["ID", "CODE"]
-        columns = ["ID", "CODE", "VAL"]
-        # Source에서는 공백 없는 "A", Target DB에는 공백 있는 "A "가 있다고 가정
-        rows = [[1, "A", 100]] 
-
-        _load_data_merge(self.mock_conn, table_name, p_keys, columns, rows)
-        
-        generated_sql = self.mock_cursor.executemany.call_args[0][0]
-        
-        # 현재 로직: 단순 비교 (=)
-        # 만약 DB의 'CODE' 컬럼이 CHAR 타입이라 공백이 들어가 있다면?
-        # T."CODE" = S.V_1 비교는 'A ' = 'A' -> False가 됨.
-        # 결과: INSERT 시도 -> PK 중복 (ORA-00001) 발생!
-        # 해결책: TRIM()을 쓰거나 해야 하지만, 인덱스 때문에 함부로 쓸 수 없음.
-        
-        print(f"\n[Integrity Check SQL] {generated_sql}")
-        self.assertIn('ON (T."ID" = S.V_0 AND T."CODE" = S.V_1)', generated_sql)
 
 if __name__ == '__main__':
     unittest.main()

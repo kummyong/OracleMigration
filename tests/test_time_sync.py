@@ -8,8 +8,8 @@ import os
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# cx_Oracle 모킹
-sys.modules['cx_Oracle'] = unittest.mock.MagicMock()
+# oracledb 모킹
+sys.modules['oracledb'] = unittest.mock.MagicMock()
 
 from migration_utils import get_last_sync_time
 
