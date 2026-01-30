@@ -242,6 +242,10 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
 
             s_cur.arraysize = fetchsize
             
+            # 쿼리 실행 타임아웃 설정 (60초) - 무한 대기 방지
+            if cx_Oracle:
+                s_cur.callTimeout = 60000
+            
             logging.info(f"[{table_name}] Source Query: {query}")
             logging.info(f"[{table_name}] Source Params: {params}")
             
