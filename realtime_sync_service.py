@@ -172,8 +172,9 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
             
         logging.info(f"[{table_name}] DB 연결 획득 완료. 마이그레이션 시작...")
 
-        # 중간 저장을 하지 않도록 비활성화 (안정성을 위해 제거)
+        # 중간 저장을 위한 콜백 함수 정의
         def _sync_progress_callback(current_max_ts):
+            # 안정성을 위해 중간 저장 기능 비활성화 (pass)
             pass
 
         result = migrate(
