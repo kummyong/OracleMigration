@@ -26,8 +26,10 @@ def get_last_sync_time(table_name, lock=None):
         if lock:
             with lock: times = _read_file()
         else: times = _read_file()
-        return datetime.fromisoformat(times.get(table_name, "1970-01-01T00:00:00"))
-    except: return datetime(1970, 1, 1)
+        # Default to 3 days ago if no history found
+        default_start = (datetime.now() - timedelta(days=3)).isoformat()
+        return datetime.fromisoformat(times.get(table_name, default_start))
+    except: return datetime.now() - timedelta(days=3)
 
 def update_last_sync_time(table_name, sync_time, lock):
     with lock:
