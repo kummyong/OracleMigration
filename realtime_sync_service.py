@@ -112,7 +112,9 @@ def acquire_connection_with_retry(pool, db_label, max_retries=3):
     for attempt in range(max_retries):
         conn = None
         try:
+            logging.debug(f"[{db_label}] 세션 풀 연결 요청 중... (시도 {attempt+1}/{max_retries})")
             conn = pool.acquire()
+            logging.debug(f"[{db_label}] 세션 풀 연결 획득 성공. Ping 테스트 진행...")
             # 가져온 연결이 유효한지 확인 (Ping)
             conn.ping()
             return conn
@@ -137,6 +139,7 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
     start_op_time = time.monotonic()
     
     # 초기에 상태를 '진행중'으로 설정
+    logging.info(f"[{table_name}] Worker 시작 - 초기 상태 설정 중")
     with cycle_status_lock:
         current_status = cycle_status["tables"][table_name]
         last_sync_init = get_last_sync_time(table_name, file_update_lock)
@@ -154,12 +157,16 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
         
         # 풀이 있으면 acquire, 없으면(SQLite 등) 신규 연결
         if source_pool:
+            logging.info(f"[{table_name}] Source DB 연결 획득 시도...")
             source_conn = acquire_connection_with_retry(source_pool, "Source")
+            logging.info(f"[{table_name}] Source DB 연결 획득 완료.")
         else:
             source_conn = get_db_connection(SOURCE_DB_CONFIG)
             
         if target_pool:
+            logging.info(f"[{table_name}] Target DB 연결 획득 시도...")
             target_conn = acquire_connection_with_retry(target_pool, "Target")
+            logging.info(f"[{table_name}] Target DB 연결 획득 완료.")
         else:
             target_conn = get_db_connection(TARGET_DB_CONFIG)
             
@@ -228,14 +235,14 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
                     })
                 else:
                     # 아직 재시도 횟수가 남음
-                                    current_status.update({
-                                        "status": "failed",
-                                        "processed": result["processed"],
-                                        "errors": result["errors"],
-                                        "message": f"일시적 실패: {result['errors']}개 오류. 재시도 예정."
-                                    })
+                    current_status.update({
+                        "status": "failed",
+                        "processed": result["processed"],
+                        "errors": result["errors"],
+                        "message": f"일시적 실패: {result['errors']}개 오류. 재시도 예정."
+                    })
                             
-                            logging.info(f"[{table_name}] 테이블 작업 종료.")
+        logging.info(f"[{table_name}] 테이블 작업 종료.")
     except Exception as e:
         error_message = f"오류 발생: {str(e)}"
         logging.error(f"[{table_name}] 작업 실패. {error_message}", exc_info=True)
@@ -257,7 +264,9 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
         with cycle_status_lock:
             cycle_status["tables"][table_name]["duration"] = duration
             # 대시보드는 각 테이블 작업이 끝날 때마다 항상 업데이트
+            logging.debug(f"[{table_name}] 작업 완료. 대시보드 업데이트 중...")
             generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+            logging.debug(f"[{table_name}] 대시보드 업데이트 완료.")
 
 def main_service_loop():
     """메인 서비스 루프. 주기적으로 모든 테이블의 동기화를 트리거하고 대시보드를 생성합니다."""
@@ -300,7 +309,9 @@ def main_service_loop():
                         cycle_status["tables"][config['table_name']].update({"status": "in_progress", "message": "작업 시작 중..."})
                 
                 # 2. '진행중' 상태의 대시보드를 생성
+                logging.info("[Main] 사이클 초기 대시보드 생성 중...")
                 generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+                logging.info("[Main] 사이클 초기 대시보드 생성 완료.")
 
                 # 3. 동기화 작업 제출 (세션 풀 전달)
                 futures = [executor.submit(sync_single_table, config, cycle_start_time, source_pool, target_pool) for config in enriched_configs]
@@ -342,4 +353,3 @@ if __name__ == '__main__':
         logging.info("사용자에 의해 서비스가 중지되었습니다.")
     except Exception as e:
         logging.critical(f"서비스 실행 중 심각한 오류 발생: {e}", exc_info=True)
-
