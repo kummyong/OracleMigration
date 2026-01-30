@@ -56,59 +56,61 @@ def get_session_pool(config, min_conn=1, max_conn=10):
 
 def get_upsert_keys(connection, table_name):
     """
-    소스 DB의 데이터 딕셔너리를 조회하여 테이블의 Upsert에 사용할 키 컬럼 목록을 반환합니다.
-    1순위: Primary Key
-    2순위: 첫 번째 Unique Key
+    지능형 PK 탐지 로직:
+    1순위: PK 제약조건, 2순위: UK 제약조건, 3순위: 데이터 프로파일링을 통한 가상 PK
     """
-    if hasattr(connection, 'username'):
-        owner = connection.username.upper()
-    else:
-        return []
-
+    if not hasattr(connection, 'username'): return []
+    owner = connection.username.upper()
     table_name_upper = table_name.upper()
 
-    # 1순위: Primary Key 조회
-    pk_query = """
-    SELECT cols.column_name
+    # 1, 2순위: PK 및 UK 제약조건 조회
+    query = """
+    SELECT cols.column_name, cons.constraint_type
     FROM all_constraints cons
     JOIN all_cons_columns cols ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
-    WHERE cons.constraint_type = 'P'
-      AND cons.owner = :owner
-      AND cons.table_name = :table_name
-    ORDER BY cols.position
+    WHERE cons.owner = :owner AND cons.table_name = :table_name
+      AND cons.constraint_type IN ('P', 'U') AND cons.status = 'ENABLED'
+    ORDER BY cons.constraint_type, cols.position
     """
-    with connection.cursor() as cursor:
-        cursor.execute(pk_query, {'owner': owner, 'table_name': table_name_upper})
-        keys = [row[0] for row in cursor.fetchall()]
-        if keys:
-            return keys
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(query, {'owner': owner, 'table_name': table_name_upper})
+            rows = cursor.fetchall()
+            if rows:
+                # P(PK)가 있으면 P만, 없으면 U(UK) 반환
+                pk_rows = [r[0] for r in rows if r[1] == 'P']
+                if pk_rows: return pk_rows
+                return [rows[0][0]] # 첫 번째 UK 컬럼 반환
 
-    # 2순위: Unique Key 조회
-    uk_query = """
-    SELECT cols.column_name
-    FROM all_constraints cons
-    JOIN all_cons_columns cols ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
-    WHERE cons.constraint_type = 'U'
-      AND cons.owner = :owner
-      AND cons.table_name = :table_name
-      AND cons.constraint_name = (
-          -- 여러 Unique 제약조건 중 첫 번째 것만 선택
-          SELECT MIN(sub_cons.constraint_name)
-          FROM all_constraints sub_cons
-          WHERE sub_cons.constraint_type = 'U'
-            AND sub_cons.owner = :owner
-            AND sub_cons.table_name = :table_name
-      )
-    ORDER BY cols.position
-    """
-    with connection.cursor() as cursor:
-        cursor.execute(uk_query, {'owner': owner, 'table_name': table_name_upper})
-        keys = [row[0] for row in cursor.fetchall()]
-        if keys:
-            logging.info(f"[{table_name}] 자동 조회된 Unique Key: {keys}")
-        else:
-            logging.warning(f"[{table_name}] 테이블에서 Primary Key 또는 Unique Key를 찾을 수 없습니다. (MERGE 불가)")
-        return keys
+        # 3순위: Heuristic & Data Profiling (제약조건이 없는 경우)
+        logging.info(f"[{table_name}] 제약조건 없음. 가상 PK 탐지를 시작합니다...")
+        candidate_keywords = ['ID', 'NO', 'CD', 'CODE', 'SEQ', 'NUM', 'KEY']
+        
+        # Not Null 컬럼 중 후보 키워드 포함된 컬럼 추출
+        candidate_query = """
+        SELECT column_name FROM all_tab_columns 
+        WHERE owner = :owner AND table_name = :table_name AND nullable = 'N'
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(candidate_query, {'owner': owner, 'table_name': table_name_upper})
+            candidates = [r[0] for r in cursor.fetchall() if any(kw in r[0].upper() for kw in candidate_keywords)]
+            
+            for col in candidates:
+                # 실제 데이터 중복 검증 쿼리 (최대 1건이라도 중복 발견 시 중단)
+                prof_query = f'SELECT 1 FROM (SELECT "{col}" FROM "{table_name}" GROUP BY "{col}" HAVING COUNT(*) > 1) WHERE ROWNUM = 1'
+                try:
+                    # 프로파일링은 오래 걸릴 수 있으므로 짧은 타임아웃 권장되나 여기서는 기본 수행
+                    cursor.execute(prof_query)
+                    if cursor.fetchone() is None:
+                        logging.info(f"[{table_name}] 데이터 검증된 가상 PK 채택: {col}")
+                        return [col]
+                except: continue
+                
+        logging.warning(f"[{table_name}] 유효한 키를 찾지 못했습니다. (INSERT 모드로 동작)")
+        return []
+    except Exception as e:
+        logging.error(f"[{table_name}] PK 탐색 중 오류: {e}")
+        return []
 
 def get_table_columns(connection, table_name):
     """

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  source-db:
+    image: gvenzl/oracle-xe:18.4.0-slim
+    container_name: oracle_source
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_PASSWORD=oracle
+    healthcheck:
+      test: ["CMD", "sqlplus", "-L", "SYSTEM/oracle@//localhost:1521/XE", "select 1 from dual;"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  target-db:
+    image: gvenzl/oracle-xe:18.4.0-slim
+    container_name: oracle_target
+    ports:
+      - "1522:1521"
+    environment:
+      - ORACLE_PASSWORD=oracle
+    healthcheck:
+      test: ["CMD", "sqlplus", "-L", "SYSTEM/oracle@//localhost:1521/XE", "select 1 from dual;"]
+      interval: 10s
+      timeout: 5s
+      retries: 20

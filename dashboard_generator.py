@@ -109,6 +109,8 @@ def generate_html_dashboard(status_data, interval, output_path):
     }
     
     for table_name, data in sorted_tables:
+        if not data: continue # 데이터가 없으면 스킵
+        
         status_key = data.get('status', 'pending')
         status_text = status_map.get(status_key, status_key) # 한글 변환, 없으면 원본 사용
         message = data.get('message', '대기')

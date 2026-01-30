@@ -1,9 +1,502 @@
 [
     {
-        "table_name": "SALES",
-        "primary_keys": ["ID"],
-        "date_column": "SALE_TIMESTAMP",
-        "hint_index_column": "REG_DT",
-        "index_scan_gap_minutes": 720
+        "table_name": "TB_SENSOR_001",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_002",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_003",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_004",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_005",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_006",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_007",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_008",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_009",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_010",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_011",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_012",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_013",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_014",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_015",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_016",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_017",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_018",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_019",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_020",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_021",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_022",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_023",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_024",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_025",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_026",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_027",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_028",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_029",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_030",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_031",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_032",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_033",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_034",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_035",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_036",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_037",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_038",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_039",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_040",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_041",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_042",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_043",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_044",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_045",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_046",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_047",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_048",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_049",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
+    },
+    {
+        "table_name": "TB_SENSOR_050",
+        "enabled": true,
+        "auto_schema_sync": false,
+        "primary_keys": [
+            "SENSOR_ID"
+        ],
+        "date_column": "EVENT_TIME",
+        "description": "자동 생성됨"
     }
 ]
