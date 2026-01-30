@@ -62,7 +62,14 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
         try:
             with connection.cursor() as cursor:
                 # SQL Execution Timeout (60s)
-                if cx_Oracle: cursor.callTimeout = 60000
+                if cx_Oracle: 
+                    try:
+                        cursor.connection.callTimeout = 60000
+                    except AttributeError:
+                         try:
+                            cursor.callTimeout = 60000
+                         except AttributeError:
+                             pass # Timeout 설정 실패 시 무시
                 
                 # Construct MERGE SQL using DUAL with Safe Aliases to prevent ORA-01745
                 # Map column name to safe alias V_0, V_1, ...
@@ -248,7 +255,15 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             
             # 쿼리 실행 타임아웃 설정 (60초) - 무한 대기 방지
             if cx_Oracle:
-                s_cur.callTimeout = 60000
+                try:
+                    # cx_Oracle 8.2+ 지원
+                    s_cur.connection.callTimeout = 60000
+                except AttributeError:
+                    try:
+                         # Older versions might support execution options or just ignore
+                         s_cur.callTimeout = 60000
+                    except AttributeError:
+                        logging.warning(f"[{table_name}] cx_Oracle 버전이 낮아 Query Timeout 설정을 실패했습니다.")
             
             logging.info(f"[{table_name}] Source Query: {query}")
             logging.info(f"[{table_name}] Source Params: {params}")

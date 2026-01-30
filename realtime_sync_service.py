@@ -332,6 +332,7 @@ def main_service_loop():
                     
                     logging.info(f"여전히 진행 중인 테이블({len(running_tables)}): {running_tables}")
                     logging.info(f"대기 중... (남은 작업: {len(not_done)}, 활성 스레드: {threading.active_count()})")
+                    logging.debug(f"활성 스레드 목록: {[t.name for t in threading.enumerate()]}")
                     
                     # 10초 후 다시 확인
                     done, not_done = concurrent.futures.wait(futures, timeout=10)
