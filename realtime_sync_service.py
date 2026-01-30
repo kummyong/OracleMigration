@@ -162,6 +162,8 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
             target_conn = acquire_connection_with_retry(target_pool, "Target")
         else:
             target_conn = get_db_connection(TARGET_DB_CONFIG)
+            
+        logging.info(f"[{table_name}] DB 연결 획득 완료. 마이그레이션 시작...")
 
         # 중간 저장을 위한 콜백 함수 정의
         def _sync_progress_callback(current_max_ts):
@@ -226,13 +228,14 @@ def sync_single_table(table_config, sync_start_time, source_pool=None, target_po
                     })
                 else:
                     # 아직 재시도 횟수가 남음
-                    current_status.update({
-                        "status": "failed",
-                        "processed": result["processed"],
-                        "errors": result["errors"],
-                        "message": f"일시적 실패: {result['errors']}개 오류. 다음 사이클에 재시도합니다."
-                    })
-
+                                    current_status.update({
+                                        "status": "failed",
+                                        "processed": result["processed"],
+                                        "errors": result["errors"],
+                                        "message": f"일시적 실패: {result['errors']}개 오류. 재시도 예정."
+                                    })
+                            
+                            logging.info(f"[{table_name}] 테이블 작업 종료.")
     except Exception as e:
         error_message = f"오류 발생: {str(e)}"
         logging.error(f"[{table_name}] 작업 실패. {error_message}", exc_info=True)
@@ -288,7 +291,7 @@ def main_service_loop():
         with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='SyncWorker') as executor:
             while True:
                 cycle_start_time = datetime.now()
-                logging.info(f"--- 동기화 사이클 시작: {cycle_start_time.isoformat()} ---")
+                logging.info(f"--- 동기화 사이클 시작: {cycle_start_time.isoformat()} (활성 스레드: {threading.active_count()}) ---")
 
                 # 1. 대시보드 데이터 상태를 '진행중'으로 업데이트
                 with cycle_status_lock:
@@ -303,9 +306,9 @@ def main_service_loop():
                 futures = [executor.submit(sync_single_table, config, cycle_start_time, source_pool, target_pool) for config in enriched_configs]
                 
                 # 4. 모든 작업이 완료될 때까지 기다림
-                logging.info("모든 테이블의 동기화 작업이 완료될 때까지 기다립니다...")
+                logging.info(f"모든 테이블의 동기화 작업이 완료될 때까지 기다립니다... (현재 활성 스레드: {threading.active_count()})")
                 concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
-                logging.info("모든 동기화 작업이 완료되었습니다.")
+                logging.info(f"모든 동기화 작업이 완료되었습니다. (현재 활성 스레드: {threading.active_count()})")
 
                 # 사이클 소요 시간 계산
                 cycle_end_time = datetime.now()
