@@ -318,9 +318,24 @@ def main_service_loop():
                 # 3. 동기화 작업 제출 (세션 풀 전달)
                 futures = [executor.submit(sync_single_table, config, cycle_start_time, source_pool, target_pool) for config in enriched_configs]
                 
-                # 4. 모든 작업이 완료될 때까지 기다림
+                # 4. 모든 작업이 완료될 때까지 기다림 (상태 모니터링 추가)
                 logging.info(f"모든 테이블의 동기화 작업이 완료될 때까지 기다립니다... (현재 활성 스레드: {threading.active_count()})")
-                concurrent.futures.wait(futures) # 모든 future가 완료될 때까지 블록킹
+                
+                done, not_done = concurrent.futures.wait(futures, timeout=10)
+                while not_done:
+                    # 진행 중인 테이블 확인
+                    running_tables = []
+                    with cycle_status_lock:
+                        for tbl, stat in cycle_status["tables"].items():
+                            if stat.get("status") == "in_progress":
+                                running_tables.append(tbl)
+                    
+                    logging.info(f"여전히 진행 중인 테이블({len(running_tables)}): {running_tables}")
+                    logging.info(f"대기 중... (남은 작업: {len(not_done)}, 활성 스레드: {threading.active_count()})")
+                    
+                    # 10초 후 다시 확인
+                    done, not_done = concurrent.futures.wait(futures, timeout=10)
+
                 logging.info(f"모든 동기화 작업이 완료되었습니다. (현재 활성 스레드: {threading.active_count()})")
 
                 # 사이클 소요 시간 계산
