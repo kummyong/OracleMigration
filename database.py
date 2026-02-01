@@ -1,6 +1,13 @@
 try:
     import oracledb
     import sys
+    
+    # Oracle 11g 지원을 위해 Thick Mode 활성화 (Instant Client 필요)
+    try:
+        oracledb.init_oracle_client()
+    except Exception as e:
+        print(f"Warning: Oracle Client 초기화 실패 (Thick Mode 미적용): {e}")
+
     # cx_Oracle 호환 모드 활성화 (cx_Oracle이 설치되지 않아도 동작하게 함)
     oracledb.version = "8.3.0"
     sys.modules["cx_Oracle"] = oracledb
