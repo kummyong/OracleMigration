@@ -24,8 +24,8 @@ SYNC_INTERVAL_SECONDS = 10
 MAX_WORKERS = 10
 FETCH_SIZE = 10000
 MAX_CONSECUTIVE_FAILURES = 3  # 연속 실패 허용 횟수
-SAFETY_MARGIN_SECONDS = 300  # ?덉쟾 留덉쭊 (5遺? - 而ㅻ컠 吏???곗씠???꾨씫 諛⑹?)
-SKIP_SOURCE_VALIDATION = True  # ?뚯뒪 DB ?ㅼ젙 寃??踰붾???吏?吏?
+SAFETY_MARGIN_SECONDS = 300  # 안전 마진 (5분) - 커밋 지연으로 인한 데이터 누락 방지
+SKIP_SOURCE_VALIDATION = True  # 소스 DB 설정 검증 과정을 건너뛸지 여부
 
 # -------------------- #
 
@@ -59,9 +59,9 @@ def setup_logging():
     log_file = os.path.join(
         log_dir, f"sync_service_{datetime.now().strftime('%Y-%m-%d')}.log"
     )
-    # 10MB 크기, 5개 백업
+    # 10MB ?ш린, 5媛?諛깆뾽
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8-sig"
     )
     file_handler.setFormatter(logging.Formatter(log_format))
     root_logger.addHandler(file_handler)
@@ -78,7 +78,7 @@ cycle_status = {"tables": {}}
 def load_table_configs():
     """JSON 설정 파일에서 동기화할 테이블 목록을 로드합니다."""
     try:
-        with open(TABLES_CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(TABLES_CONFIG_FILE, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except FileNotFoundError:
         logging.error(f"'{TABLES_CONFIG_FILE}' 설정 파일을 찾을 수 없습니다.")
@@ -89,48 +89,48 @@ def load_table_configs():
 
 
 def enrich_table_configs(configs):
-    """?뚯씠釉??ㅼ젙??PK/UK ?뺣낫媛 ?놁쑝硫?DB?먯꽌 議고쉶?섏뿬 梨꾩썙?ｌ뒿?덈떎."""
-    # 1. ?ъ슜?섏? ?딅뒗 ?뚯씠釉?1李??꾪꽣留?
+    """테이블 설정에 PK/UK 정보가 없으면 DB에서 조회하여 채워넣습니다."""
+    # 1. 사용하지 않는 테이블 1차 필터링
     active_configs = [c for c in configs if c.get("enabled", True) is not False]
 
-    # 2. 異붽? 議곗궗 ?꾩슂 ?щ??먮떒
+    # 2. 추가 조사 필요 여부 판단
     needs_enrichment = False
     if not SKIP_SOURCE_VALIDATION:
         needs_enrichment = True
     else:
-        # SKIP ?듦??? ?섎굹?쇰룄 PK媛 ?놁쑝硫??곌껐 ?댁빞 ??
+        # SKIP 모드라도 하나라도 PK가 없으면 연결 해야 함
         for config in active_configs:
             if not config.get("primary_keys"):
                 needs_enrichment = True
-                logging.info(f"[{config['table_name']}] PK ?ㅼ젙???꾪븳 DB 議고쉶媛??꾩슂?⑸땲??")
+                logging.info(f"[{config['table_name']}] PK 설정이 없는 테이블이 있어 DB 조회가 필요합니다.")
                 break
     
     if not needs_enrichment:
-        logging.info("?뚯뒪 DB 寃??怨쇱젙???앸왂?⑸땲?? (SKIP_SOURCE_VALIDATION=True or 紐⑤뱺 PK ?먯옱)")
+        logging.info("소스 DB 검증 과정을 생략합니다. (SKIP_SOURCE_VALIDATION=True 또는 모든 PK 존재)")
         return active_configs
 
     enriched_configs = []
     source_conn = None
     try:
-        logging.info("?뚯씠釉??ㅼ젙 蹂닿컯???꾪빐 ?뚯뒪 DB???곌껐?⑸땲??..")
+        logging.info("테이블 설정 보강을 위해 소스 DB에 연결합니다...")
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
         for config in active_configs:
             table_name = config["table_name"]
-            # primary_keys媛 ?ㅼ젙 ?뚯씪??紐낆떆?섏뼱 ?덉? ?딆쑝硫?DB?먯꽌 議고쉶 ?쒕룄
+            # primary_keys가 설정 파일에 명시되어 있지 않으면 DB에서 조회 시도
             if not config.get("primary_keys"):
                 upsert_keys = get_upsert_keys(source_conn, table_name)
                 if upsert_keys:
                     config["primary_keys"] = upsert_keys
                 else:
                     logging.warning(
-                        f"[{table_name}] Primary Key ?먮뒗 Unique Key瑜?李얠쓣 ???없?뒿?덈떎. (PK ?없?씠 INSERT 紐⑤뱶濡?吏꾪뻾)"
+                        f"[{table_name}] Primary Key 또는 Unique Key를 찾을 수 없습니다. (PK 없이 INSERT 모드로 진행)"
                     )
-                    config["primary_keys"] = []  # PK/UK媛 ?없?쑝硫?鍮?由ъ뒪?몃줈 ?ㅼ젙
+                    config["primary_keys"] = []  # PK/UK가 없으면 빈 리스트로 설정
 
             enriched_configs.append(config)
 
     except Exception as e:
-        logging.critical(f"?뚯씠釉??ㅼ젙 蹂닿컯 以??ㅻ쪟: {e}", exc_info=True)
+        logging.critical(f"테이블 설정 보강 중 오류: {e}", exc_info=True)
         return None
     finally:
         if source_conn:
@@ -250,6 +250,7 @@ def sync_single_table(
             update_callback=_sync_progress_callback,
             hint_index_column=table_config.get("hint_index_column"),
             index_scan_gap_minutes=table_config.get("index_scan_gap_minutes", 0),
+            hint=table_config.get("hint"),
         )
 
         with cycle_status_lock:

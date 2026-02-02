@@ -138,7 +138,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
             connection.rollback()
             raise
 
-def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None, hint_index_column=None, index_scan_gap_minutes=0):
+def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_date, source_conn, target_conn, update_callback=None, hint_index_column=None, index_scan_gap_minutes=0, hint=None):
     logging.info(f"[{table_name}] Migration start: {start_date} -> {end_date}")
     total_rows = 0
     total_err = 0
@@ -191,7 +191,10 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
                 where += f" AND \"{hint_index_column}\" >= :3"
                 params.append(idx_start)
             
-            query = f"SELECT {sel_clause} FROM \"{table_name}\" WHERE {where} ORDER BY \"{date_column_name}\""
+            # 힌트 적용
+            hint_clause = f"/*+ {hint} */ " if hint else ""
+            query = f"SELECT {hint_clause}{sel_clause} FROM \"{table_name}\" WHERE {where} ORDER BY \"{date_column_name}\""
+            
             if "." in table_name:
                 parts = table_name.split(".")
                 quoted_table = ".".join([f"\"{p}\"" for p in parts])
