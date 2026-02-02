@@ -164,6 +164,27 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
         current_slice_end = min(current_start + slice_delta, end_date)
         logging.info(f"[{table_name}] Processing Slice: {current_start} ~ {current_slice_end}")
 
+        # [PK가 없는 경우] 중복 방지를 위한 'Delete-then-Insert' 전략 적용
+        if not p_keys:
+            try:
+                del_sql = f"DELETE FROM \"{table_name}\" WHERE \"{date_column_name}\" >= :1 AND \"{date_column_name}\" < :2"
+                # 테이블명에 스키마(.)가 포함된 경우 따옴표 처리
+                if "." in table_name:
+                    parts = table_name.split(".")
+                    quoted_table = ".".join([f"\"{p}\"" for p in parts])
+                    del_sql = del_sql.replace(f"\"{table_name}\"", quoted_table)
+                
+                with target_conn.cursor() as t_cur:
+                    t_cur.execute(del_sql, [current_start, current_slice_end])
+                    deleted_rows = t_cur.rowcount
+                target_conn.commit()
+                if deleted_rows > 0:
+                    logging.info(f"[{table_name}] PK 없음: 중복 방지를 위해 기존 구간 데이터 삭제됨 ({deleted_rows}건)")
+            except Exception as e:
+                logging.error(f"[{table_name}] 구간 삭제 실패 (INSERT 모드 중단): {e}")
+                target_conn.rollback()
+                raise
+
         with source_conn.cursor() as s_cur:
             if cx_Oracle and hasattr(source_conn, 'username'):
                 s_cur.outputtypehandler = OutputTypeHandler
