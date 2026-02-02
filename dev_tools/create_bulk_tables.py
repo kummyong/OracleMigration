@@ -1,4 +1,4 @@
-import oracledb
+import cx_Oracle
 import sys
 import os
 import random
@@ -10,10 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 # 프로젝트 루트 경로 추가하여 config 등 임포트 가능하게 함
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# cx_Oracle 호환 패치
-oracledb.version = "8.3.0"
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
 from config import SOURCE_DB_CONFIG
 
 # 로깅 설정

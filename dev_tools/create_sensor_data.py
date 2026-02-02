@@ -1,12 +1,7 @@
-import oracledb
+import cx_Oracle
 import sys
 import random
 from datetime import datetime, timedelta
-
-# cx_Oracle 호환 패치
-oracledb.version = "8.3.0"
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
 from config import SOURCE_DB_CONFIG
 
 def create_large_sensor_data():

@@ -1,4 +1,4 @@
-import oracledb
+import cx_Oracle
 import sys
 import os
 import logging
@@ -7,12 +7,6 @@ import logging
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import TARGET_DB_CONFIG
-
-# cx_Oracle 호환 패치
-oracledb.version = "8.3.0"
-import sys
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

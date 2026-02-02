@@ -1,12 +1,6 @@
-import oracledb
+import cx_Oracle
 import sys
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG
-
-# cx_Oracle 호환 패치
-oracledb.version = "8.3.0"
-import sys
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
 
 def create_db_tester(config, label):
     print(f"Creating DB_TESTER on {label}...")
