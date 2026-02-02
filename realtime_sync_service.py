@@ -24,7 +24,9 @@ SYNC_INTERVAL_SECONDS = 10
 MAX_WORKERS = 10
 FETCH_SIZE = 10000
 MAX_CONSECUTIVE_FAILURES = 3  # 연속 실패 허용 횟수
-SAFETY_MARGIN_SECONDS = 300  # 안전 마진 (5분) - 커밋 지연 데이터 누락 방지용
+SAFETY_MARGIN_SECONDS = 300  # ?덉쟾 留덉쭊 (5遺? - 而ㅻ컠 吏???곗씠???꾨씫 諛⑹?)
+SKIP_SOURCE_VALIDATION = True  # ?뚯뒪 DB ?ㅼ젙 寃??踰붾???吏?吏?
+
 # -------------------- #
 
 # 스크립트의 절대 경로를 기준으로 파일 경로 설정
@@ -87,30 +89,48 @@ def load_table_configs():
 
 
 def enrich_table_configs(configs):
-    """테이블 설정에 PK/UK 정보가 없으면 DB에서 조회하여 채워넣습니다."""
+    """?뚯씠釉??ㅼ젙??PK/UK ?뺣낫媛 ?놁쑝硫?DB?먯꽌 議고쉶?섏뿬 梨꾩썙?ｌ뒿?덈떎."""
+    # 1. ?ъ슜?섏? ?딅뒗 ?뚯씠釉?1李??꾪꽣留?
+    active_configs = [c for c in configs if c.get("enabled", True) is not False]
+
+    # 2. 異붽? 議곗궗 ?꾩슂 ?щ??먮떒
+    needs_enrichment = False
+    if not SKIP_SOURCE_VALIDATION:
+        needs_enrichment = True
+    else:
+        # SKIP ?듦??? ?섎굹?쇰룄 PK媛 ?놁쑝硫??곌껐 ?댁빞 ??
+        for config in active_configs:
+            if not config.get("primary_keys"):
+                needs_enrichment = True
+                logging.info(f"[{config['table_name']}] PK ?ㅼ젙???꾪븳 DB 議고쉶媛??꾩슂?⑸땲??")
+                break
+    
+    if not needs_enrichment:
+        logging.info("?뚯뒪 DB 寃??怨쇱젙???앸왂?⑸땲?? (SKIP_SOURCE_VALIDATION=True or 紐⑤뱺 PK ?먯옱)")
+        return active_configs
+
     enriched_configs = []
     source_conn = None
     try:
-        logging.info("테이블 설정 보강을 위해 소스 DB에 연결합니다...")
+        logging.info("?뚯씠釉??ㅼ젙 蹂닿컯???꾪빐 ?뚯뒪 DB???곌껐?⑸땲??..")
         source_conn = get_db_connection(SOURCE_DB_CONFIG)
-        for config in configs:
+        for config in active_configs:
             table_name = config["table_name"]
-            # primary_keys가 설정 파일에 명시되어 있지 않으면 DB에서 조회 시도
+            # primary_keys媛 ?ㅼ젙 ?뚯씪??紐낆떆?섏뼱 ?덉? ?딆쑝硫?DB?먯꽌 議고쉶 ?쒕룄
             if not config.get("primary_keys"):
                 upsert_keys = get_upsert_keys(source_conn, table_name)
                 if upsert_keys:
                     config["primary_keys"] = upsert_keys
                 else:
                     logging.warning(
-                        f"[{table_name}] Primary Key 또는 Unique Key를 찾을 수 없습니다. (PK 없이 INSERT 모드로 진행)"
+                        f"[{table_name}] Primary Key ?먮뒗 Unique Key瑜?李얠쓣 ???없?뒿?덈떎. (PK ?없?씠 INSERT 紐⑤뱶濡?吏꾪뻾)"
                     )
-                    config["primary_keys"] = []  # PK/UK가 없으면 빈 리스트로 설정
+                    config["primary_keys"] = []  # PK/UK媛 ?없?쑝硫?鍮?由ъ뒪?몃줈 ?ㅼ젙
 
-            # 키 유무와 관계없이 모든 테이블을 동기화 대상에 추가
             enriched_configs.append(config)
 
     except Exception as e:
-        logging.critical(f"테이블 설정 보강 중 오류: {e}", exc_info=True)
+        logging.critical(f"?뚯씠釉??ㅼ젙 蹂닿컯 以??ㅻ쪟: {e}", exc_info=True)
         return None
     finally:
         if source_conn:
