@@ -5,9 +5,6 @@ import logging
 import time
 import sys
 import oracledb
-
-# cx_Oracle 호환 모드 활성화
-oracledb.version = "8.3.0"
 sys.modules["cx_Oracle"] = oracledb
 import cx_Oracle
 

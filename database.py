@@ -1,49 +1,38 @@
-try:
-    import oracledb
-    import sys
-    
-    # Oracle 11g 지원을 위해 Thick Mode 활성화 (Instant Client 필요)
-    try:
-        oracledb.init_oracle_client()
-    except Exception as e:
-        print(f"Warning: Oracle Client 초기화 실패 (Thick Mode 미적용): {e}")
-
-    # cx_Oracle 호환 모드 활성화 (cx_Oracle이 설치되지 않아도 동작하게 함)
-    oracledb.version = "8.3.0"
-    sys.modules["cx_Oracle"] = oracledb
-    import cx_Oracle # 이제 oracledb가 cx_Oracle인 척 함
-except ImportError:
-    cx_Oracle = None
+import oracledb
+import sys
 import logging
 import os
 from datetime import datetime
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG, LAST_SYNC_TIME_FILE
 
+# Thick Mode 활성화 (Oracle Client 11.2 지원을 위해)
+try:
+    oracledb.init_oracle_client()
+    logging.info("Oracle Thick Mode 활성화됨 (Local Client 사용)")
+except Exception as e:
+    logging.error(f"Oracle Thick Mode 활성화 실패: {e}")
+
+# cx_Oracle 호환성 유지
+sys.modules["cx_Oracle"] = oracledb
+
 def get_db_connection(config):
     """지정된 설정으로 데이터베이스 연결을 생성합니다."""
-    # Oracle 처리
-    if cx_Oracle is None:
-        raise ImportError("cx_Oracle(oracledb) 패키지가 설치되어 있지 않아 Oracle DB에 연결할 수 없습니다.")
-        
     try:
-        conn = cx_Oracle.connect(
+        conn = oracledb.connect(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn']
         )
         logging.info(f"성공적으로 Oracle DB에 연결되었습니다. (DSN: {config['dsn']})")
         return conn
-    except cx_Oracle.Error as e:
+    except oracledb.Error as e:
         logging.error(f"Oracle DB 연결 중 오류 발생 (DSN: {config['dsn']}): {e}")
         raise
 
 def get_session_pool(config, min_conn=1, max_conn=10):
     """지정된 설정으로 Oracle 세션 풀을 생성합니다."""
-    if cx_Oracle is None:
-        raise ImportError("cx_Oracle(oracledb) 패키지가 없어 세션 풀을 생성할 수 없습니다.")
-
     try:
-        pool = cx_Oracle.SessionPool(
+        pool = oracledb.SessionPool(
             user=config['user'],
             password=config['password'],
             dsn=config['dsn'],
@@ -51,13 +40,12 @@ def get_session_pool(config, min_conn=1, max_conn=10):
             max=max_conn,
             increment=1,
             encoding="UTF-8",
-            threaded=True,
-            getmode=cx_Oracle.SPOOL_ATTRVAL_WAIT,
+            getmode=oracledb.SPOOL_ATTRVAL_WAIT,
             ping_interval=60
         )
         logging.info(f"Oracle 세션 풀이 생성되었습니다. (DSN: {config['dsn']}, Max: {max_conn})")
         return pool
-    except cx_Oracle.Error as e:
+    except oracledb.Error as e:
         logging.error(f"세션 풀 생성 중 오류 발생: {e}")
         raise
 

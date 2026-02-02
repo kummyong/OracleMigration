@@ -1,9 +1,6 @@
 import unittest
 import sys
 import oracledb
-
-# cx_Oracle 호환 모드 활성화 (반드시 import cx_Oracle 전에 수행)
-oracledb.version = "8.3.0"
 sys.modules["cx_Oracle"] = oracledb
 import cx_Oracle
 import os

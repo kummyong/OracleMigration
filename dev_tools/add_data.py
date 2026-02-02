@@ -1,9 +1,9 @@
 import oracledb
 import sys
-# cx_Oracle 호환 패치
-oracledb.version = "8.3.0"
 sys.modules["cx_Oracle"] = oracledb
 import cx_Oracle
+import random
+from datetime import datetime, timedelta
 from config import SOURCE_DB_CONFIG
 
 def add_data():
