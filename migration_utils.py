@@ -66,12 +66,7 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
     if p_keys:
         try:
             with connection.cursor() as cursor:
-                # SQL Execution Timeout (60s)
-                if cx_Oracle: 
-                    try:
-                        if hasattr(cursor, 'connection') and hasattr(cursor.connection, 'callTimeout'):
-                            cursor.connection.callTimeout = 60000
-                    except: pass
+
                 
                 col_map = {col: f"V_{i}" for i, col in enumerate(columns)}
                 col_map_upper = {col.upper(): f"V_{i}" for i, col in enumerate(columns)}
@@ -205,10 +200,6 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             s_cur.arraysize = fetchsize
             
             try:
-                # 쿼리 실행 타임아웃 설정 (60초)
-                if cx_Oracle and hasattr(s_cur, 'connection') and hasattr(s_cur.connection, 'callTimeout'):
-                    s_cur.connection.callTimeout = 60000
-                
                 s_cur.execute(query, params)
                 
                 cols = [d[0] for d in s_cur.description]
