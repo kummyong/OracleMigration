@@ -50,13 +50,30 @@ def get_session_pool(config, min_conn=1, max_conn=10):
         logging.error(f"세션 풀 생성 중 오류 발생: {e}")
         raise
 
+def _get_db_user(connection):
+    """안전하게 DB 사용자명을 가져옵니다. (connection.username이 None인 경우 대비)"""
+    try:
+        if hasattr(connection, 'username') and connection.username:
+            return connection.username.upper()
+        
+        # connection.username이 없는 경우 쿼리로 조회
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT USER FROM DUAL")
+            row = cursor.fetchone()
+            if row:
+                return row[0].upper()
+    except Exception as e:
+        logging.warning(f"DB 사용자명 조회 실패: {e}")
+    return None
+
 def get_upsert_keys(connection, table_name):
     """
     지능형 PK 탐지 로직:
     1순위: PK 제약조건, 2순위: UK 제약조건, 3순위: 데이터 프로파일링을 통한 가상 PK
     """
-    if not hasattr(connection, 'username'): return []
-    owner = connection.username.upper()
+    owner = _get_db_user(connection)
+    if not owner: return []
+
     table_name_upper = table_name.upper()
 
     # 1, 2순위: PK 및 UK 제약조건 조회
@@ -116,10 +133,9 @@ def get_table_columns(connection, table_name):
     """
     table_name_upper = table_name.upper()
 
-    # Oracle DB인지 확인
-    if hasattr(connection, 'username'):
-        owner = connection.username.upper()
-        
+    # DB 사용자명 확인
+    owner = _get_db_user(connection)
+    if owner:
         query = """
         SELECT column_name, data_type, data_length
         FROM all_tab_columns
