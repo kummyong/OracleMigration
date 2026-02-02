@@ -1,8 +1,9 @@
 import unittest
 import sys
-import oracledb
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
+try:
+    import cx_Oracle
+except ImportError:
+    cx_Oracle = None
 import os
 import json
 import time

@@ -1,3 +1,1 @@
-oracledb
-cryptography
-typing_extensions
+cx_Oracle

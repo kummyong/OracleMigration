@@ -1,9 +1,8 @@
 # migration_utils.py
-import oracledb
-import sys
-# cx_Oracle 호환 모드 활성화
-sys.modules["cx_Oracle"] = oracledb
-import cx_Oracle
+try:
+    import cx_Oracle
+except ImportError:
+    cx_Oracle = None
 import logging
 import os
 import json

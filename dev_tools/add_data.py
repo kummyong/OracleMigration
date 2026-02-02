@@ -1,7 +1,5 @@
-import oracledb
-import sys
-sys.modules["cx_Oracle"] = oracledb
 import cx_Oracle
+import sys
 import random
 from datetime import datetime, timedelta
 from config import SOURCE_DB_CONFIG

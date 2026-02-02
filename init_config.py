@@ -4,8 +4,6 @@ import os
 import logging
 import time
 import sys
-import oracledb
-sys.modules["cx_Oracle"] = oracledb
 import cx_Oracle
 
 from config import SOURCE_DB_CONFIG, TABLES_CONFIG_FILE
