@@ -195,137 +195,149 @@ def sync_single_table(
         )
 
     source_conn, target_conn = None, None
+    
+    # [Retry Logic] 변수 초기화
+    max_retries = 3
+    retry_count = 0
+    current_sync_start_date = None # 재시도 시 재개할 시작점
+
     try:
+        # 1. 초기 동기화 시간 계산
         last_sync = get_last_sync_time(table_name, file_update_lock)
         logging.info(f"[{table_name}] Previous sync time: {last_sync.isoformat()}")
         
-        # 안전 마진 적용: 커밋 지연으로 인한 누락 방지를 위해 5분 전부터 스캔
+        # 안전 마진 적용
         start_date = last_sync - timedelta(seconds=SAFETY_MARGIN_SECONDS)
         logging.info(f"[{table_name}] 안전 마진 {SAFETY_MARGIN_SECONDS}초 적용: {last_sync.isoformat()}부터가 아닌 {start_date.isoformat()}부터 스캔합니다.")
+        logging.info(f"[{table_name}] Current cycle window end: {sync_start_time.isoformat()}")
+        
+        current_sync_start_date = start_date
 
-        logging.info(
-            f"[{table_name}] Current cycle window end: {sync_start_time.isoformat()}"
-        )
-
-        # 풀이 있으면 acquire, 없으면(SQLite 등) 신규 연결
-        if source_pool:
-            logging.info(f"[{table_name}] Source DB 연결 획득 시도...")
-            source_conn = acquire_connection_with_retry(source_pool, "Source")
-            logging.info(f"[{table_name}] Source DB 연결 획득 완료.")
-        else:
-            source_conn = get_db_connection(SOURCE_DB_CONFIG)
-
-        if target_pool:
-            logging.info(f"[{table_name}] Target DB 연결 획득 시도...")
-            target_conn = acquire_connection_with_retry(target_pool, "Target")
-            logging.info(f"[{table_name}] Target DB 연결 획득 완료.")
-        else:
-            target_conn = get_db_connection(TARGET_DB_CONFIG)
-
-        logging.info(f"[{table_name}] DB 연결 획득 완료. 마이그레이션 시작...")
-
-        # 진행 상황을 대시보드에 실시간으로 표시하기 위한 콜백
-        def _sync_progress_callback(progress_info):
-            with cycle_status_lock:
-                start_str = progress_info["slice_start"].strftime("%H:%M")
-                end_str = progress_info["slice_end"].strftime("%H:%M")
-                proc_count = progress_info["processed"]
+        while retry_count <= max_retries:
+            try:
+                # 2. DB 연결 획득 (없는 경우에만)
+                if not source_conn:
+                    if source_pool:
+                        logging.info(f"[{table_name}] Source DB 연결 획득 시도... (Retry: {retry_count})")
+                        source_conn = acquire_connection_with_retry(source_pool, "Source")
+                    else:
+                        source_conn = get_db_connection(SOURCE_DB_CONFIG)
                 
-                # 대시보드 메시지 업데이트
-                current_status.update({
-                    "message": f"[{start_str}~{end_str}] {proc_count:,}건 처리 중",
-                    "processed": proc_count,
-                    "last_sync_time": progress_info["current_max_ts"].strftime('%Y-%m-%d %H:%M:%S')
-                })
+                if not target_conn:
+                    if target_pool:
+                        logging.info(f"[{table_name}] Target DB 연결 획득 시도... (Retry: {retry_count})")
+                        target_conn = acquire_connection_with_retry(target_pool, "Target")
+                    else:
+                        target_conn = get_db_connection(TARGET_DB_CONFIG)
 
-        result = migrate(
-            table_name=table_name,
-            p_keys=table_config["primary_keys"],
-            date_column_name=table_config["date_column"],
-            fetchsize=FETCH_SIZE,
-            start_date=start_date,
-            end_date=sync_start_time,
-            source_conn=source_conn,
-            target_conn=target_conn,
-            update_callback=_sync_progress_callback,
-            hint_index_column=table_config.get("hint_index_column"),
-            index_scan_gap_minutes=table_config.get("index_scan_gap_minutes", 0),
-            hint=table_config.get("hint"),
-        )
+                logging.info(f"[{table_name}] DB 연결 획득 완료. 마이그레이션 시작 (Start: {current_sync_start_date})...")
 
-        with cycle_status_lock:
-            current_status = cycle_status["tables"][table_name]
-            new_last_sync_time = result["max_ts"]
+                # 3. 진행 상황 콜백 (재시도 시 이어서 하기 위해 current_sync_start_date 업데이트)
+                def _sync_progress_callback(progress_info):
+                    nonlocal current_sync_start_date
+                    # 성공적으로 처리된 최신 슬라이스 끝 지점을 다음 시작점으로 기록
+                    # 주의: slice_end는 exclusive하므로 그대로 다음 start로 사용 가능
+                    current_sync_start_date = progress_info["slice_end"]
+                    
+                    with cycle_status_lock:
+                        start_str = progress_info["slice_start"].strftime("%H:%M")
+                        end_str = progress_info["slice_end"].strftime("%H:%M")
+                        proc_count = progress_info["processed"]
+                        
+                        current_status.update({
+                            "message": f"[{start_str}~{end_str}] {proc_count:,}건 처리 중 (Retry: {retry_count})",
+                            "processed": proc_count,
+                            "last_sync_time": progress_info["current_max_ts"].strftime('%Y-%m-%d %H:%M:%S')
+                        })
 
-            # 대시보드에 표시할 시간 업데이트 (오류 발생 시에도 처리된 지점까지 표시)
-            current_status["last_sync_time"] = new_last_sync_time.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-
-            if result["errors"] == 0:
-                # 성공 시
-                update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
-                logging.info(
-                    f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}"
+                # 4. 마이그레이션 수행
+                result = migrate(
+                    table_name=table_name,
+                    p_keys=table_config["primary_keys"],
+                    date_column_name=table_config["date_column"],
+                    fetchsize=FETCH_SIZE,
+                    start_date=current_sync_start_date, # 재시도 시 업데이트된 시간부터
+                    end_date=sync_start_time,
+                    source_conn=source_conn,
+                    target_conn=target_conn,
+                    update_callback=_sync_progress_callback,
+                    hint_index_column=table_config.get("hint_index_column"),
+                    index_scan_gap_minutes=table_config.get("index_scan_gap_minutes", 0),
+                    hint=table_config.get("hint"),
                 )
 
-                current_status.update(
-                    {
-                        "status": "success" if result["processed"] > 0 else "no_data",
-                        "processed": result["processed"],
-                        "errors": 0,
-                        "message": (
-                            f"성공 (처리: {result['processed']})"
-                            if result["processed"] > 0
-                            else "변경 데이터 없음"
-                        ),
-                        "consecutive_failures": 0,  # 성공 시 카운터 리셋
-                    }
-                )
-            else:
-                # 오류 발생 시
-                current_status["consecutive_failures"] += 1
-                logging.warning(
-                    f"[{table_name}] 오류 발생. 연속 실패 횟수: {current_status['consecutive_failures']}"
-                )
+                # 5. 성공 시 처리
+                with cycle_status_lock:
+                    current_status = cycle_status["tables"][table_name]
+                    new_last_sync_time = result["max_ts"]
+                    current_status["last_sync_time"] = new_last_sync_time.strftime("%Y-%m-%d %H:%M:%S")
 
-                if current_status["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES:
-                    # 최대 실패 횟수 도달 - 서킷 브레이커 작동
-                    logging.critical(
-                        f"[{table_name}] 최대 연속 실패 횟수({MAX_CONSECUTIVE_FAILURES})에 도달했습니다. "
-                        f"문제가 되는 데이터 구간을 건너뛰고 다음 사이클부터 정상 진행을 시도합니다. "
-                        f"마지막 동기화 시간을 현재 사이클 시간({sync_start_time.isoformat()})으로 강제 업데이트합니다."
-                    )
+                    if result["errors"] == 0:
+                        update_last_sync_time(table_name, new_last_sync_time, file_update_lock)
+                        logging.info(f"[{table_name}] New sync time from data: {new_last_sync_time.isoformat()}")
 
-                    # 동기화 시간을 강제로 현재 사이클 시간으로 업데이트하여 문제 구간을 건너뜀
-                    update_last_sync_time(table_name, sync_start_time, file_update_lock)
-
-                    current_status.update(
-                        {
-                            "status": "persistent_failure",
-                            "processed": result[
-                                "processed"
-                            ],  # 이번 주기에 처리 시도한 내용
-                            "errors": result["errors"],
-                            "message": f"영구 실패: {result['errors']}개 오류. 데이터 구간을 건너뛰었습니다.",
-                            "last_sync_time": sync_start_time.strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
-                            "consecutive_failures": 0,  # 다음 정상 처리를 위해 리셋
-                        }
-                    )
-                else:
-                    # 아직 재시도 횟수가 남음
-                    current_status.update(
-                        {
-                            "status": "failed",
+                        current_status.update({
+                            "status": "success" if result["processed"] > 0 else "no_data",
                             "processed": result["processed"],
-                            "errors": result["errors"],
-                            "message": f"일시적 실패: {result['errors']}개 오류. 재시도 예정.",
-                        }
-                    )
+                            "errors": 0,
+                            "message": (f"성공 (처리: {result['processed']})" if result["processed"] > 0 else "변경 데이터 없음"),
+                            "consecutive_failures": 0,
+                        })
+                    else:
+                         # 데이터 오류 (연결 오류 아님)
+                         current_status["consecutive_failures"] += 1
+                         logging.warning(f"[{table_name}] 데이터 처리 중 오류 발생. 연속 실패: {current_status['consecutive_failures']}")
+                         
+                         if current_status["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES:
+                             logging.critical(f"[{table_name}] 최대 연속 실패 도달. 해당 구간 건너뜀.")
+                             update_last_sync_time(table_name, sync_start_time, file_update_lock)
+                             current_status.update({
+                                 "status": "persistent_failure",
+                                 "processed": result["processed"],
+                                 "errors": result["errors"],
+                                 "message": f"영구 실패: {result['errors']}건 오류. 구간 건너뜀.",
+                                 "last_sync_time": sync_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                 "consecutive_failures": 0,
+                             })
+                         else:
+                             current_status.update({
+                                 "status": "failed",
+                                 "processed": result["processed"],
+                                 "errors": result["errors"],
+                                 "message": f"일시적 실패: {result['errors']}건 오류. 재시도 예정.",
+                             })
+                
+                # 성공적으로 마쳤으므로 루프 탈출
+                break 
 
-        logging.info(f"[{table_name}] 테이블 작업 종료.")
+            except Exception as e:
+                # 예외 처리 및 재시도 판단
+                error_str = str(e)
+                is_connection_error = "DPI-1010" in error_str or "DPI-1080" in error_str or "ORA-03113" in error_str or "ORA-03114" in error_str
+                
+                if is_connection_error:
+                    retry_count += 1
+                    logging.warning(f"[{table_name}] 연결 오류 감지 (DPI-1010/Timeout 등): {e}. 재시도 {retry_count}/{max_retries}...")
+                    
+                    # 연결 폐기
+                    try:
+                        if source_pool and source_conn: source_pool.drop(source_conn)
+                        if target_pool and target_conn: target_pool.drop(target_conn)
+                    except: pass
+                    
+                    source_conn = None
+                    target_conn = None
+                    
+                    if retry_count > max_retries:
+                        logging.error(f"[{table_name}] 최대 재시도 횟수 초과. 작업을 중단합니다.")
+                        raise # 최종 실패 처리
+                        
+                    # 잠시 대기 후 재시도
+                    time.sleep(5)
+                else:
+                    # 연결 오류가 아닌 일반 오류는 즉시 실패 처리
+                    raise
+
     except Exception as e:
         error_message = f"오류 발생: {str(e)}"
         logging.error(f"[{table_name}] 작업 실패. {error_message}", exc_info=True)
@@ -335,20 +347,23 @@ def sync_single_table(
             )
     finally:
         # 풀에서 가져온 경우 release, 직접 연결한 경우 close
-        if source_pool and source_conn:
-            source_pool.release(source_conn)
-        elif source_conn:
-            source_conn.close()
+        # (재시도 로직에서 이미 drop된 경우 None일 수 있음)
+        try:
+            if source_pool and source_conn:
+                source_pool.release(source_conn)
+            elif source_conn:
+                source_conn.close()
 
-        if target_pool and target_conn:
-            target_pool.release(target_conn)
-        elif target_conn:
-            target_conn.close()
+            if target_pool and target_conn:
+                target_pool.release(target_conn)
+            elif target_conn:
+                target_conn.close()
+        except Exception as e:
+            logging.warning(f"[{table_name}] 연결 해제 중 오류 (무시됨): {e}")
 
         duration = time.monotonic() - start_op_time
         with cycle_status_lock:
             cycle_status["tables"][table_name]["duration"] = duration
-            # 개별 워커에서는 더 이상 대시보드를 직접 그리지 않음 (충돌 방지)
 
         logging.info(f"[{table_name}] 테이블 작업 종료.")
 
