@@ -20,11 +20,11 @@ from migration_utils import migrate, get_last_sync_time, update_last_sync_time
 from dashboard_generator import generate_html_dashboard
 
 # --- 서비스 설정 --- #
-SYNC_INTERVAL_SECONDS = 10
+SYNC_INTERVAL_SECONDS = 30
 MAX_WORKERS = 10
 FETCH_SIZE = 10000
 MAX_CONSECUTIVE_FAILURES = 3  # 연속 실패 허용 횟수
-SAFETY_MARGIN_SECONDS = 300  # 안전 마진 (5분) - 커밋 지연으로 인한 데이터 누락 방지
+SAFETY_MARGIN_SECONDS = 60  # 안전 마진 (1분) - 커밋 지연으로 인한 데이터 누락 방지 (기존 300초에서 단축)
 SKIP_SOURCE_VALIDATION = True  # 소스 DB 설정 검증 과정을 건너뛸지 여부
 
 # -------------------- #

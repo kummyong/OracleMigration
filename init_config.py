@@ -155,6 +155,8 @@ def main():
                     if not is_new:
                         updated_count += 1
                         logging.info(f"[{table_name}] 힌트 자동 추가: {optimal_hint}")
+                else:
+                    logging.warning(f"[{table_name}] 주의: 날짜 컬럼 '{config['date_column']}'에 대한 적절한 인덱스를 찾지 못했습니다. 성능 저하가 우려됩니다.")
 
             final_list.append(config)
 

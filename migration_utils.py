@@ -88,7 +88,10 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 update_clause = ""
                 if update_cols:
                     updates = [f"T.\"{c}\"=S.{col_map[c]}" for c in update_cols]
-                    update_clause = f"WHEN MATCHED THEN UPDATE SET {', '.join(updates)}"
+                    # 실제로 값이 다른 경우에만 업데이트 하도록 WHERE 조건 추가 (Redo Log 생성 최소화)
+                    change_conds = [f"(T.\"{c}\" IS NULL AND S.{col_map[c]} IS NOT NULL) OR (T.\"{c}\" IS NOT NULL AND S.{col_map[c]} IS NULL) OR (T.\"{c}\" != S.{col_map[c]})" for c in update_cols]
+                    where_clause = f" WHERE {' OR '.join(change_conds)}"
+                    update_clause = f"WHEN MATCHED THEN UPDATE SET {', '.join(updates)}{where_clause}"
                 
                 cols_str = ", ".join([f"\"{c}\"" for c in columns])
                 vals_str = ", ".join([f"S.{col_map[c]}" for c in columns])
