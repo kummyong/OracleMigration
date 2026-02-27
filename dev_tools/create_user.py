@@ -1,20 +1,23 @@
-import cx_Oracle
+try:
+    import oracledb as cx_Oracle
+except ImportError:
+    import cx_Oracle
 import sys
 from config import SOURCE_DB_CONFIG, TARGET_DB_CONFIG
 
 def create_db_tester(config, label):
-    print(f"Creating DB_TESTER on {label}...")
+    print(f"Creating DB_TESTER on {label} (using SYSTEM)...")
     try:
         # SYSTEM 계정으로 접속
-        conn = cx_Oracle.connect(**config)
+        conn = cx_Oracle.connect(user="SYSTEM", password="oracle", dsn=config['dsn'])
         cursor = conn.cursor()
         
         # 유저 생성 및 권한 부여
         sql_commands = [
-            "DROP USER DB_TESTER CASCADE", # 기존 유저 삭제
+            "DROP USER DB_TESTER CASCADE", 
             "CREATE USER DB_TESTER IDENTIFIED BY test_password",
-            "GRANT CONNECT, RESOURCE, UNLIMITED TABLESPACE TO DB_TESTER",
-            "GRANT CREATE VIEW, CREATE TABLE, CREATE SEQUENCE TO DB_TESTER"
+            "GRANT CONNECT, RESOURCE, DBA TO DB_TESTER",
+            "ALTER USER DB_TESTER QUOTA UNLIMITED ON USERS"
         ]
         
         for sql in sql_commands:

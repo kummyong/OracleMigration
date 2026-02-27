@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 from logging.handlers import RotatingFileHandler
+import copy
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 from config import (
     SOURCE_DB_CONFIG,
@@ -15,6 +18,31 @@ from config import (
     TABLES_CONFIG_FILE,
     DASHBOARD_FILE,
 )
+
+# --- 서비스 전역 설정 파일 --- #
+SERVICE_CONFIG_FILE = 'service_config.json'
+
+def load_service_config():
+    if os.path.exists(SERVICE_CONFIG_FILE):
+        try:
+            with open(SERVICE_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except: pass
+    return {"service_running": False, "sync_interval": 30}
+
+def save_service_config(config):
+    try:
+        with open(SERVICE_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+    except Exception as e:
+        logging.error(f"Failed to save service config: {e}")
+
+# 초기값 로드
+_s_config = load_service_config()
+SERVICE_RUNNING = _s_config.get("service_running", False)
+SYNC_INTERVAL_SECONDS = _s_config.get("sync_interval", 30)
+# ----------------------------- #
+
 from database import get_db_connection, get_upsert_keys, get_session_pool
 from migration_utils import migrate, get_last_sync_time, update_last_sync_time
 from dashboard_generator import generate_html_dashboard
@@ -74,6 +102,128 @@ cycle_status_lock = threading.Lock()  # 대시보드 데이터용
 # 대시보드용 데이터를 담을 공유 딕셔너리
 cycle_status = {"tables": {}}
 
+# API 서버를 위한 핸들러
+class DashboardAPIHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        global SERVICE_RUNNING, SYNC_INTERVAL_SECONDS
+        parsed_path = urlparse(self.path)
+        
+        if parsed_path.path == '/api/toggle':
+            query = parse_qs(parsed_path.query)
+            table_name = query.get('table', [None])[0]
+            action = query.get('action', [None])[0]
+            
+            if table_name and action:
+                with cycle_status_lock:
+                    if table_name in cycle_status["tables"]:
+                        new_state = (action == 'resume')
+                        cycle_status["tables"][table_name]["enabled"] = new_state
+                        if not new_state:
+                            cycle_status["tables"][table_name]["status"] = "paused"
+                            cycle_status["tables"][table_name]["message"] = "사용자에 의해 중지됨"
+                        else:
+                            cycle_status["tables"][table_name]["status"] = "pending"
+                            cycle_status["tables"][table_name]["message"] = "재개됨 (대기 중)"
+                        
+                        logging.info(f"[API] Table {table_name} set to {'ENABLED' if new_state else 'DISABLED'}")
+                        
+                        # 1. JSON 설정 파일에 영구 저장 (Persistence)
+                        try:
+                            with open(TABLES_CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
+                                configs = json.load(f)
+                            for cfg in configs:
+                                if cfg['table_name'] == table_name:
+                                    cfg['enabled'] = new_state
+                                    break
+                            with open(TABLES_CONFIG_FILE, 'w', encoding='utf-8-sig') as f:
+                                json.dump(configs, f, indent=4, ensure_ascii=False)
+                        except Exception as e:
+                            logging.error(f"[API] 설정 파일 업데이트 실패: {e}")
+
+                        # 2. 대시보드 갱신을 위해 데이터 복사
+                        status_copy = copy.deepcopy(cycle_status)
+                        
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": True}).encode())
+                        
+                        # 락 밖에서 대시보드 갱신
+                        generate_html_dashboard(status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING)
+                        return
+            
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": False, "message": "Invalid parameters"}).encode())
+            return
+        
+        elif parsed_path.path == '/api/global':
+            query = parse_qs(parsed_path.query)
+            action = query.get('action', [None])[0]
+            
+            if action:
+                if action == 'start_all':
+                    SERVICE_RUNNING = True
+                    logging.info("[API] 전체 서비스 시작 명령 수신")
+                elif action == 'stop_all':
+                    SERVICE_RUNNING = False
+                    logging.info("[API] 전체 서비스 중지 명령 수신")
+                
+                # 설정 저장
+                save_service_config({"service_running": SERVICE_RUNNING, "sync_interval": SYNC_INTERVAL_SECONDS})
+                
+                with cycle_status_lock:
+                    status_copy = copy.deepcopy(cycle_status)
+
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode())
+                
+                generate_html_dashboard(status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING)
+                return
+
+        elif parsed_path.path == '/api/set_interval':
+            query = parse_qs(parsed_path.query)
+            new_val = query.get('value', [None])[0]
+            
+            if new_val and new_val.isdigit():
+                SYNC_INTERVAL_SECONDS = int(new_val)
+                logging.info(f"[API] 동기화 주기 변경: {SYNC_INTERVAL_SECONDS}초")
+                
+                # 설정 저장
+                save_service_config({"service_running": SERVICE_RUNNING, "sync_interval": SYNC_INTERVAL_SECONDS})
+                
+                with cycle_status_lock:
+                    status_copy = copy.deepcopy(cycle_status)
+
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode())
+                
+                generate_html_dashboard(status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING)
+                return
+            
+        # 기본 대시보드 파일 서비스
+        if parsed_path.path == '/' or parsed_path.path == '/dashboard.html':
+            try:
+                with open(DASHBOARD_ABS_PATH, 'rb') as f:
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(f.read())
+            except FileNotFoundError:
+                self.send_response(404)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def start_api_server(port=8081):
+    server = HTTPServer(('127.0.0.1', port), DashboardAPIHandler)
+    logging.info(f"API 서버가 포트 {port}에서 127.0.0.1로 시작되었습니다.")
+    server.serve_forever()
 
 def load_table_configs():
     """JSON 설정 파일에서 동기화할 테이블 목록을 로드합니다."""
@@ -90,8 +240,8 @@ def load_table_configs():
 
 def enrich_table_configs(configs):
     """테이블 설정에 PK/UK 정보가 없으면 DB에서 조회하여 채워넣습니다."""
-    # 1. 사용하지 않는 테이블 1차 필터링
-    active_configs = [c for c in configs if c.get("enabled", True) is not False]
+    # 1. 모든 테이블 설정을 보강 대상으로 함 (중지된 테이블도 대시보드 표시 및 재개를 위해 필요)
+    active_configs = configs
 
     # 2. 추가 조사 필요 여부 판단
     needs_enrichment = False
@@ -392,12 +542,13 @@ def main_service_loop():
     with cycle_status_lock:
         cycle_status["tables"] = {}
         for config in enriched_configs:
-            if config.get("enabled", True) is not False:
-                cycle_status["tables"][config["table_name"]] = {
-                    "status": "pending",
-                    "message": "대기",
-                    "consecutive_failures": 0,
-                }
+            is_enabled = config.get("enabled", True)
+            cycle_status["tables"][config["table_name"]] = {
+                "status": "pending" if is_enabled else "paused",
+                "message": "대기" if is_enabled else "사용자에 의해 중지됨",
+                "enabled": is_enabled,
+                "consecutive_failures": 0,
+            }
 
     # 세션 풀 초기화 (Oracle의 경우 효율적인 연결 관리를 위함)
     source_pool = None
@@ -407,6 +558,10 @@ def main_service_loop():
         pool_size = MAX_WORKERS + 3
         source_pool = get_session_pool(SOURCE_DB_CONFIG, min_conn=2, max_conn=pool_size)
         target_pool = get_session_pool(TARGET_DB_CONFIG, min_conn=2, max_conn=pool_size)
+
+        # API 서버 시작 (세션 풀 생성 성공 후 시작)
+        api_thread = threading.Thread(target=start_api_server, kwargs={'port': 8081}, daemon=True)
+        api_thread.start()
 
         with ThreadPoolExecutor(
             max_workers=MAX_WORKERS, thread_name_prefix="SyncWorker"
@@ -423,30 +578,47 @@ def main_service_loop():
                         "%Y-%m-%d %H:%M:%S"
                     )
                     for config in enriched_configs:
-                        cycle_status["tables"][config["table_name"]].update(
-                            {"status": "in_progress", "message": "작업 시작 중..."}
-                        )
+                        t_name = config["table_name"]
+                        if cycle_status["tables"][t_name].get("enabled", True):
+                            cycle_status["tables"][t_name].update(
+                                {"status": "in_progress", "message": "작업 시작 중..."}
+                            )
+                    # 락 안에서 데이터를 복사
+                    status_copy = copy.deepcopy(cycle_status)
+                
+                # 서비스 중지 상태이면 동기화 로직 건너뜀
+                if not SERVICE_RUNNING:
+                    logging.info("--- 서비스 중지 상태: 다음 사이클까지 대기합니다. ---")
+                    generate_html_dashboard(status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING)
+                    time.sleep(SYNC_INTERVAL_SECONDS)
+                    continue
 
-                # 2. '진행중' 상태의 대시보드를 생성
+                # 락 밖에서 대시보드 생성
                 logging.info("[Main] 사이클 초기 대시보드 생성 중...")
                 generate_html_dashboard(
-                    cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH
+                    status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING
                 )
                 logging.info("[Main] 사이클 초기 대시보드 생성 완료.")
 
-                # 3. 동기화 작업 제출 (세션 풀 전달)
-                futures = [
-                    executor.submit(
-                        sync_single_table,
-                        config,
-                        cycle_start_time,
-                        source_pool,
-                        target_pool,
-                    )
-                    for config in enriched_configs
-                ]
+                # 2. 동기화 작업 제출 (세션 풀 전달)
+                futures = []
+                with cycle_status_lock: # 락 범위 축소 권장되나 여기선 일관성을 위해 유지
+                    for config in enriched_configs:
+                        t_name = config["table_name"]
+                        if cycle_status["tables"][t_name].get("enabled", True):
+                            futures.append(
+                                executor.submit(
+                                    sync_single_table,
+                                    config,
+                                    cycle_start_time,
+                                    source_pool,
+                                    target_pool,
+                                )
+                            )
+                        else:
+                            logging.info(f"[{t_name}] 중지 상태이므로 이번 사이클에서 제외합니다.")
 
-                # 4. 모든 작업이 완료될 때까지 주기적으로 대시보드 갱신하며 기다림
+                # 3. 모든 작업이 완료될 때까지 주기적으로 대시보드 갱신하며 기다림
                 logging.info(
                     f"모든 테이블의 동기화 작업이 완료될 때까지 기다립니다... (현재 활성 스레드: {threading.active_count()})"
                 )
@@ -455,13 +627,15 @@ def main_service_loop():
                 while not_done:
                     # 진행 중인 상태를 대시보드에 반영
                     with cycle_status_lock:
-                        generate_html_dashboard(cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH)
+                        status_copy = copy.deepcopy(cycle_status)
                         
                         # 실제 진행 중인 테이블명 추출
                         running_tables = [
                             name for name, info in cycle_status["tables"].items() 
                             if info.get("status") == "in_progress"
                         ]
+                    
+                    generate_html_dashboard(status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING)
                     
                     logging.info(f"동기화 진행 중인 테이블({len(running_tables)}개): {running_tables}")
                     logging.info(f"대기 중... (미완료 작업: {len(not_done)}, 전체 활성 스레드: {threading.active_count()})")
@@ -490,9 +664,11 @@ def main_service_loop():
                             updated_tables_count += 1
 
                     cycle_status["updated_tables_count"] = updated_tables_count
-                    generate_html_dashboard(
-                        cycle_status, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH
-                    )
+                    status_copy = copy.deepcopy(cycle_status)
+                
+                generate_html_dashboard(
+                    status_copy, SYNC_INTERVAL_SECONDS, DASHBOARD_ABS_PATH, SERVICE_RUNNING
+                )
 
                 logging.info(
                     f"사이클 완료. 다음 사이클까지 {SYNC_INTERVAL_SECONDS}초 대기합니다."

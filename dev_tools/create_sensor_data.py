@@ -1,4 +1,7 @@
-import cx_Oracle
+try:
+    import oracledb as cx_Oracle
+except ImportError:
+    import cx_Oracle
 import sys
 import random
 from datetime import datetime, timedelta

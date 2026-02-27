@@ -1,4 +1,4 @@
-[
+﻿[
     {
         "table_name": "TB_SENSOR_001",
         "enabled": true,
@@ -11,7 +11,7 @@
     },
     {
         "table_name": "TB_SENSOR_002",
-        "enabled": true,
+        "enabled": false,
         "auto_schema_sync": false,
         "primary_keys": [
             "SENSOR_ID"
@@ -141,7 +141,7 @@
     },
     {
         "table_name": "TB_SENSOR_015",
-        "enabled": true,
+        "enabled": false,
         "auto_schema_sync": false,
         "primary_keys": [
             "SENSOR_ID"

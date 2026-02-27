@@ -1,18 +1,22 @@
 # migration_utils.py
-try:
-    import cx_Oracle
-except ImportError:
-    cx_Oracle = None
 import logging
 import os
 import json
 import time
 from datetime import datetime, timedelta
 from config import LAST_SYNC_TIME_FILE
-from database import get_table_columns
+from database import get_table_columns, cx_Oracle
 
 # 시간 쪼개기 단위 설정 (기본 1시간)
 TIME_SLICE_MINUTES = 60 
+
+def get_quoted_table(table_name):
+    """스키마를 포함한 테이블 명칭에 대해 각각 따옴표를 적용하여 반환합니다."""
+    if not table_name:
+        return table_name
+    if "." in table_name:
+        return ".".join([f'"{p}"' for p in table_name.split(".")])
+    return f'"{table_name}"'
 
 def OutputTypeHandler(cursor, name, defaultType, size, precision, scale):
     if defaultType == cx_Oracle.DB_TYPE_CLOB:
@@ -96,9 +100,10 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
                 cols_str = ", ".join([f"\"{c}\"" for c in columns])
                 vals_str = ", ".join([f"S.{col_map[c]}" for c in columns])
                 
-                merge_sql = f"MERGE INTO {table_name} T USING (SELECT {using_vals} FROM DUAL) S ON ({on_cond}) {update_clause} WHEN NOT MATCHED THEN INSERT ({cols_str}) VALUES ({vals_str})"
+                quoted_table = get_quoted_table(table_name)
+                merge_sql = f"MERGE INTO {quoted_table} T USING (SELECT {using_vals} FROM DUAL) S ON ({on_cond}) {update_clause} WHEN NOT MATCHED THEN INSERT ({cols_str}) VALUES ({vals_str})"
 
-                input_sizes = [cx_Oracle.TIMESTAMP if isinstance(val, datetime) else (cx_Oracle.CLOB if isinstance(val, str) and len(val) > 4000 else None) for val in rows[0]]
+                input_sizes = [cx_Oracle.TIMESTAMP if isinstance(val, datetime) else None for val in rows[0]]
                 cursor.setinputsizes(*input_sizes)
 
                 try:
@@ -121,7 +126,8 @@ def _load_data_merge(connection, table_name, p_keys, columns, rows):
         # INSERT Mode
         binds = ", ".join([f":{i+1}" for i in range(len(columns))])
         quoted_cols = ", ".join([f"\"{c}\"" for c in columns])
-        sql = f"INSERT INTO {table_name} ({quoted_cols}) VALUES ({binds})"
+        quoted_table = get_quoted_table(table_name)
+        sql = f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({binds})"
         try:
             with connection.cursor() as cursor:
                 try:
@@ -164,12 +170,8 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
         # [PK가 없는 경우] 중복 방지를 위한 'Delete-then-Insert' 전략 적용
         if not p_keys:
             try:
-                del_sql = f"DELETE FROM \"{table_name}\" WHERE \"{date_column_name}\" >= :1 AND \"{date_column_name}\" < :2"
-                # 테이블명에 스키마(.)가 포함된 경우 따옴표 처리
-                if "." in table_name:
-                    parts = table_name.split(".")
-                    quoted_table = ".".join([f"\"{p}\"" for p in parts])
-                    del_sql = del_sql.replace(f"\"{table_name}\"", quoted_table)
+                quoted_table = get_quoted_table(table_name)
+                del_sql = f"DELETE FROM {quoted_table} WHERE \"{date_column_name}\" >= :1 AND \"{date_column_name}\" < :2"
                 
                 with target_conn.cursor() as t_cur:
                     t_cur.execute(del_sql, [current_start, current_slice_end])
@@ -196,12 +198,8 @@ def migrate(table_name, p_keys, date_column_name, fetchsize, start_date, end_dat
             
             # 힌트 적용
             hint_clause = f"/*+ {hint} */ " if hint else ""
-            query = f"SELECT {hint_clause}{sel_clause} FROM \"{table_name}\" WHERE {where} ORDER BY \"{date_column_name}\""
-            
-            if "." in table_name:
-                parts = table_name.split(".")
-                quoted_table = ".".join([f"\"{p}\"" for p in parts])
-                query = query.replace(f"\"{table_name}\"", quoted_table)
+            quoted_table = get_quoted_table(table_name)
+            query = f"SELECT {hint_clause}{sel_clause} FROM {quoted_table} WHERE {where} ORDER BY \"{date_column_name}\""
 
             s_cur.arraysize = fetchsize
             

@@ -4,10 +4,8 @@ import os
 import logging
 import time
 import sys
-import cx_Oracle
-
 from config import SOURCE_DB_CONFIG, TABLES_CONFIG_FILE
-from database import get_db_connection, get_upsert_keys
+from database import get_db_connection, get_upsert_keys, cx_Oracle
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
